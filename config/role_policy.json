@@ -1,0 +1,191 @@
+{
+  "version": "2026-07-11",
+  "description": "RoleLens v1 role policy. These boundaries prevent role views from becoming superficial role-play.",
+  "roles": {
+    "executive": {
+      "display_name": "Executive",
+      "focus": [
+        "strategy",
+        "ROI",
+        "business risk",
+        "decision options",
+        "resource allocation"
+      ],
+      "allowed_inputs": [
+        "evidence_objects",
+        "data_health_summary",
+        "strategy_profile",
+        "business_question",
+        "risk_results"
+      ],
+      "required_outputs": [
+        "role_concern",
+        "key_finding",
+        "supporting_evidence",
+        "risks_or_assumptions",
+        "missing_information",
+        "next_action",
+        "dependency",
+        "human_review_required"
+      ],
+      "forbidden_actions": [
+        "approve budget without cost or ROI evidence",
+        "treat external industry context as direct internal proof",
+        "ignore data quality warnings"
+      ],
+      "must_flag_if": [
+        "financial evidence is missing",
+        "recommendation requires budget or strategic approval",
+        "evidence confidence is low"
+      ]
+    },
+    "data_analyst": {
+      "display_name": "Data Analyst / Data Scientist",
+      "focus": [
+        "metric validity",
+        "analysis feasibility",
+        "modeling potential",
+        "bias",
+        "target variable",
+        "feature quality"
+      ],
+      "allowed_inputs": [
+        "evidence_objects",
+        "data_health_summary",
+        "business_question",
+        "risk_results"
+      ],
+      "required_outputs": [
+        "role_concern",
+        "key_finding",
+        "supporting_evidence",
+        "risks_or_assumptions",
+        "missing_information",
+        "next_action",
+        "dependency",
+        "human_review_required"
+      ],
+      "forbidden_actions": [
+        "claim causation from correlation alone",
+        "recommend production model deployment without validation",
+        "ignore missing target or feature quality issues"
+      ],
+      "must_flag_if": [
+        "sample size is small",
+        "outliers may affect insight",
+        "target variable is unclear",
+        "correlation vs causation risk exists"
+      ]
+    },
+    "data_engineer": {
+      "display_name": "Data Engineer",
+      "focus": [
+        "data quality",
+        "schema",
+        "missing values",
+        "source reliability",
+        "pipeline readiness"
+      ],
+      "allowed_inputs": [
+        "data_health_summary",
+        "source_manifest",
+        "evidence_objects"
+      ],
+      "required_outputs": [
+        "role_concern",
+        "key_finding",
+        "supporting_evidence",
+        "risks_or_assumptions",
+        "missing_information",
+        "next_action",
+        "dependency",
+        "human_review_required"
+      ],
+      "forbidden_actions": [
+        "make strategic business recommendations",
+        "approve sales or budget actions",
+        "ignore unsupported or unclear source fields"
+      ],
+      "must_flag_if": [
+        "missing values are material",
+        "schema is unclear",
+        "source reliability is weak",
+        "data is not ready for downstream analysis"
+      ]
+    },
+    "sales_marketing": {
+      "display_name": "Sales / Marketing",
+      "focus": [
+        "customer segment",
+        "revenue opportunity",
+        "campaign action",
+        "market context",
+        "customer risk"
+      ],
+      "allowed_inputs": [
+        "evidence_objects",
+        "strategy_profile",
+        "business_question",
+        "risk_results"
+      ],
+      "required_outputs": [
+        "role_concern",
+        "key_finding",
+        "supporting_evidence",
+        "risks_or_assumptions",
+        "missing_information",
+        "next_action",
+        "dependency",
+        "human_review_required"
+      ],
+      "forbidden_actions": [
+        "recommend broad customer outreach before segment validation",
+        "claim campaign ROI without evidence",
+        "ignore data quality warnings"
+      ],
+      "must_flag_if": [
+        "customer segment is not validated",
+        "sales action depends on missing data",
+        "market context is external and not company-specific"
+      ]
+    },
+    "project_manager": {
+      "display_name": "Project Manager",
+      "focus": [
+        "task sequence",
+        "dependencies",
+        "owners",
+        "deadlines",
+        "meeting needs",
+        "approval points"
+      ],
+      "allowed_inputs": [
+        "role_views",
+        "risk_results",
+        "missing_information",
+        "business_question"
+      ],
+      "required_outputs": [
+        "role_concern",
+        "key_finding",
+        "supporting_evidence",
+        "risks_or_assumptions",
+        "missing_information",
+        "next_action",
+        "dependency",
+        "human_review_required"
+      ],
+      "forbidden_actions": [
+        "skip prerequisite data validation",
+        "assign execution before approval when risk is high",
+        "turn unresolved questions into completed tasks"
+      ],
+      "must_flag_if": [
+        "dependencies are unresolved",
+        "human review is required",
+        "meeting or approval is needed",
+        "action sequence is blocked by missing information"
+      ]
+    }
+  }
+}

@@ -1,0 +1,56 @@
+Build with Monthly Student Hackathon Challenges. Learn through IBM SkillsBuild and the IBM Bob Virtual Conference.
+Welcome to the AI Builders Challenge with IBM Bob, Sponsored by IBM SkillsBuild, Organized by BeMyApp. This global program is designed for college and university students* to build real-world AI solutions, develop in-demand technical skills, and showcase their work to a global audience.
+
+Through monthly hackathon challenges, hands-on learning experiences, and a collaborative developer community on GitHub and Discord, you'll gain practical experience using the latest IBM AI technologies while building projects that strengthen your technical portfolio and help you stand out as a next-generation AI innovator.
+
+After you build and learn during the July and August challenges, join us for a one-day virtual conference (date to be announced)! Hear from IBM experts and watch sessions featuring technical sessions, demonstrations, and opportunities to connect with fellow builders.
+
+To be eligible to enter the Challenge, you must be as student at least 18 years of age enrolled at an institution of higher education and be eligible in accordance with the BeMyApp Eligibility Policy and the Official Rules
+
+*Including students at universities, colleges, community colleges, technical or vocational schools and institutes of technology.
+
+HOW IT WORKS
+
+Whether you're looking to expand your AI knowledge or create a real-world project, the AI Builders Challenge offers multiple ways to participate.
+
+Build Real-World AI Challenge Solutions with IBM Bob
+
+Learn with IBM SkillsBuild & the Virtual Conference
+
+Participate in monthly student hackathon challenges and use IBM Bob to turn ideas into portfolio-ready AI projects. Gain hands-on experience applying AI to real-world opportunities, develop in-demand technical skills, and showcase your work to a global audience.
+Expand your AI knowledge through free IBM SkillsBuild learning experiences, webinars, educational resources, and the IBM Bob Virtual Conference. Learn from AI experts, developers, and industry leaders through technical sessions, demonstrations, and discussions focused on AI-assisted development.
+Learn More Here →
+
+HACKATHON CHALLENGE THEMES
+
+Participate in one or both monthly student challenge competitions and use IBM Bob to build innovative AI-powered solutions inspired by real-world opportunities.
+
+1. July Challenge: Reimagine Creative Industries with AI
+
+AI is transforming how people create content, tell stories, design experiences, and bring ideas to life. Build solutions that help creators work smarter, explore new forms of expression, and unlock new creative possibilities.
+
+2. August Challenge - Advance Space Exploration with AI
+
+Space exploration operates in some of the most complex and high-stakes environments, where decisions must be precise, data-rich, and often made with limited time and resources. Build solutions that help transform space exploration from data-heavy to insight-driven systems, enabling smarter missions and making space more accessible.
+
++ Wild Card Challenge - Build Intelligent Systems for the Future of Work
+
+Available during both challenge months, the Wildcard Challenge invites students to propose solutions across industries. The Wildcard Challenge is not a separate competition. Participants may submit one project per month to either the monthly challenge theme or the Wildcard Challenge.
+
+AI is evolving from a productivity tool into a true collaborator that can help people plan, coordinate, decide, and execute work more effectively. Build solutions that help individuals, teams, and organizations achieve better outcomes through intelligent automation and decision support.
+
+View Current Challenge Info & Submission Requirements →
+
+PRIZES
+
+Participants will compete for a share of the $15,000 USD total prize pool, including a Grand Prize of $5,000 USD for the top project across the Challenge. Four winners will be selected for each of the monthly competitions, winning prizes ranging from $750 USD to $2,250 USD.
+
+Monthly Challenge Awards
+
+1st Place: $2,250 USD
+Runner Up: $1,250 USD
+Most Innovative: $750 USD
+Best Use of Technology: $750 USD
+Participants can work individually or in teams and submit on the challenge platform with GitHub repository and other required submission criteria. Winners will be selected by a panel of judges who will evaluate submissions based on technical execution, innovation, challenge fit, implementation and feasibility.
+
+The two monthly competitions are launched on July 1 and August 1, and all entries must be submitted by July 31 and August 31. No purchase necessary to enter or win. 

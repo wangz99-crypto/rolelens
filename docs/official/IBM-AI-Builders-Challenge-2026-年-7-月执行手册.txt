@@ -1,0 +1,1813 @@
+# IBM AI Builders Challenge 2026 年 7 月执行手册
+
+## 0. 项目身份
+
+**项目名称：** IBM AI Builders Challenge - July 2026
+**参赛者：** Zhe Wang，University of Dayton，M.S. Business Analytics
+**参赛方向：** Wildcard Challenge - Build Intelligent Systems for the Future of Work
+**参赛方式：** Solo / 独立参赛
+**最高目标：** 以第一名为目标，完成一个具有真实商业价值、技术完成度、创新性、可行性和现实影响力的 AI 工作流系统。
+
+这个项目不是简单做一个 AI 工具，而是建立一套严谨的 AI 辅助开发系统，让我在一个月内完成超过普通个人项目水平的作品。
+
+---
+
+# 1. 核心项目哲学
+
+## 1.1 总原则
+
+本项目的目标不是“用 AI 更快地做一个普通项目”。
+
+本项目的目标是：
+
+> 用 AI 提升我的商业判断、技术理解、产品判断和项目执行能力，最终做出一个可运行、可解释、可验证、可展示的高质量项目。
+
+AI 可以帮助我：
+
+* 调研
+* 构思
+* 写代码
+* Debug
+* 审查
+* 反驳
+* 测试
+* 写文档
+* 准备 Demo
+
+但 AI 不能替代我的最终判断。
+
+---
+
+## 1.2 第一名导向原则
+
+一个有竞争力的项目必须满足以下特征：
+
+1. **窄而深**
+   不解决所有 Future of Work 问题，只解决一个具体、真实、频繁、痛感强的工作流程问题。
+
+2. **有商业价值**
+   项目必须能节省时间、减少错误、提升决策质量、改善协作效率或降低工作成本。
+
+3. **AI 是核心，不是装饰**
+   AI 不能只是生成一段文字，而要真正参与分析、判断、检测、组织、验证或执行。
+
+4. **工作流导向**
+   产品要把用户从混乱输入带到结构化、有用、可执行的输出。
+
+5. **可验证**
+   系统要尽可能显示证据、假设、风险、不确定性和人工审核点。
+
+6. **适合 3 分钟 Demo**
+   评委必须在 3 分钟内看懂：问题是什么、AI 做了什么、为什么有价值。
+
+7. **技术可控**
+   AI 可以写代码，但我必须理解代码架构、模块输入输出、依赖关系和失败场景。
+
+---
+
+# 2. 官方比赛要求
+
+## 2.1 硬性要求
+
+最终提交必须包含：
+
+* 一个可运行的 prototype 或 proof of concept。
+* 使用 IBM Bob 作为主要开发工具。
+* AI 必须是解决方案的核心功能组件。
+* 完成 IBM SkillsBuild 上要求的学习活动。
+* 一个公开 GitHub 仓库。
+* 一个清晰的 README，包含：
+
+  * Problem statement
+  * Solution description
+  * AI approach and architecture
+  * Selected challenge theme
+  * How IBM Bob was used
+* 在挑战平台发布 project submission page。
+* 一个公开可访问的 Demo 或 presentation video，最长 3 分钟。
+* 每个月只能提交一个项目。
+
+---
+
+## 2.2 官方评审标准
+
+评委会根据以下标准评分：
+
+1. **Technical Execution**
+   技术实现质量、prototype 是否能运行、AI 和相关技术是否有效使用。
+
+2. **Innovation**
+   创意、原创性、独特性，是否区别于普通 AI 工具。
+
+3. **Challenge Fit**
+   是否贴合 Wildcard Challenge：面向未来工作的智能系统。
+
+4. **Feasibility**
+   是否现实可行，是否有真实落地可能。
+
+5. **Real-World Impact**
+   是否能给真实用户、团队或组织带来实际价值。
+
+---
+
+# 3. 内部评分系统
+
+每个项目方向正式确定前，都必须评分。
+
+| 维度       | 分数 1-10 | 核心问题                          |
+| -------- | ------: | ----------------------------- |
+| 问题强度     |         | 痛点是否真实、具体、强烈？                 |
+| 商业价值     |         | 是否节省时间、降低成本、减少错误或提升决策？        |
+| AI 核心深度  |         | AI 是否是必要组件，而不是装饰？             |
+| 工作流贴合度   |         | 是否明显符合 Future of Work？        |
+| 技术可执行性   |         | 一个月内能否做出可运行版本？                |
+| 差异化      |         | 是否不同于普通 chatbot 或 AI wrapper？ |
+| 可信与验证机制  |         | 是否有证据、风险提示、不确定性或人工审核？         |
+| Demo 清晰度 |         | 是否能在 3 分钟内展示价值？               |
+
+评分规则：
+
+* **低于 55 / 80：** 放弃或大幅重构。
+* **55-65 / 80：** 弱候选方向。
+* **66-72 / 80：** 可考虑，但风险较大。
+* **73+ / 80：** 强候选方向。
+* **76+ / 80：** 如果执行得好，具备冲击第一名的潜力。
+
+---
+
+# 4. 项目文件系统
+
+建立以下 9 个核心文档：
+
+```text
+IBM_AI_Builders_July_2026/
+│
+├── 00_CORE_CONTEXT.md
+├── 01_RULES_SCORECARD.md
+├── 02_PROBLEM_BANK.md
+├── 03_RESEARCH_EVIDENCE.md
+├── 04_DECISION_LOG.md
+├── 05_PRODUCT_SPEC.md
+├── 06_ARCHITECTURE_CODE_MAP.md
+├── 07_IBM_BOB_USAGE_LOG.md
+└── 08_CRITIQUE_TEST_LOG.md
+```
+
+不要建立过重的文档系统。
+这些文档是项目运行文件，不是装饰性文件。
+
+---
+
+# 5. 文档模板
+
+## 5.1 00_CORE_CONTEXT.md
+
+用途：作为 ChatGPT Project 和其他 AI 工具的核心记忆文件。
+
+```text
+Project:
+IBM AI Builders Challenge - July 2026
+
+Participant:
+Zhe Wang, University of Dayton, M.S. Business Analytics
+
+Challenge:
+Wildcard Challenge - Build Intelligent Systems for the Future of Work
+
+Goal:
+Build a first-place-level solo project that demonstrates a working AI-powered workflow system with strong commercial value, technical execution, innovation, feasibility, and real-world impact.
+
+Current Phase:
+[Phase 0 / Week 1 / Week 2 / Week 3 / Week 4]
+
+Current Direction:
+[Not decided / Candidate direction / Final direction]
+
+Current Top 3 Risks:
+1.
+2.
+3.
+
+Current Decisions:
+1.
+2.
+3.
+
+Open Questions:
+1.
+2.
+3.
+
+Next Deliverable:
+[One concrete output]
+```
+
+这个文件不需要每小时更新。
+只在关键决策后更新。
+
+---
+
+## 5.2 01_RULES_SCORECARD.md
+
+用途：确保项目不偏离官方规则和评分标准。
+
+```text
+Official Requirements:
+- Use IBM Bob as primary development tool
+- AI must be a core component
+- Public GitHub repository
+- README required sections
+- Public demo video, maximum 3 minutes
+- SkillsBuild learning activity completed
+- One project submitted for the month
+
+Judging Criteria:
+- Technical Execution
+- Innovation
+- Challenge Fit
+- Feasibility
+- Real-World Impact
+
+Internal Score:
+Problem Strength: /10
+Commercial Value: /10
+AI Core Depth: /10
+Workflow Fit: /10
+Technical Execution: /10
+Differentiation: /10
+Trust / Verification: /10
+Demo Clarity: /10
+Total: /80
+
+Current Weakest Dimension:
+[Write weakest dimension here]
+
+Immediate Fix:
+[Write action here]
+```
+
+---
+
+## 5.3 02_PROBLEM_BANK.md
+
+用途：存放并筛选所有候选项目想法。
+
+```text
+Problem Name:
+
+Target User:
+
+Current Workflow:
+
+Pain Point:
+
+Why It Matters:
+
+Existing Alternatives:
+
+Why Existing Alternatives Are Insufficient:
+
+AI Opportunity:
+
+Workflow Automation Component:
+
+Decision Support Component:
+
+Demo Possibility:
+
+Technical Difficulty:
+
+Business Value:
+
+Risk:
+
+Score:
+
+Decision:
+Keep / Kill / Revisit
+```
+
+规则：任何项目想法都必须先进入 Problem Bank，再决定是否继续。
+
+---
+
+## 5.4 03_RESEARCH_EVIDENCE.md
+
+用途：存放证据，而不是随手复制链接。
+
+```text
+Source:
+
+Type:
+Report / Article / Product Review / User Feedback / Interview / Paper / Competitor Product
+
+Key Evidence:
+
+What It Suggests:
+
+What It Does NOT Prove:
+
+Relevance to Project:
+
+Reliability:
+High / Medium / Low
+
+Action:
+Use / Ignore / Revisit
+```
+
+重要规则：每条研究记录必须包含 **What It Does NOT Prove**，防止过度解读资料。
+
+---
+
+## 5.5 04_DECISION_LOG.md
+
+用途：记录重要决策。
+
+```text
+Date:
+
+Decision:
+
+Reason:
+
+Alternatives Considered:
+
+Main Risk:
+
+Validation Method:
+
+Status:
+Active / Reversed / Revisit Later
+```
+
+适合记录：
+
+* 选题决定
+* 技术栈决定
+* 产品方向决定
+* 架构决定
+* MVP 范围决定
+* Demo 叙事决定
+* 最终定位决定
+
+---
+
+## 5.6 05_PRODUCT_SPEC.md
+
+用途：定义产品是什么，以及不是什么。
+
+```text
+Product Name:
+
+Target User:
+
+One-Sentence Value Proposition:
+
+Core Workflow:
+
+Must-Have Features:
+1.
+2.
+3.
+
+Nice-to-Have Features:
+1.
+2.
+
+Out of Scope:
+1.
+2.
+3.
+
+AI Core Functions:
+1.
+2.
+3.
+
+Human Review Points:
+1.
+2.
+
+Demo Scenario:
+
+Success Criteria:
+```
+
+其中 **Out of Scope** 非常关键。
+Solo 一个月项目的胜负，很多时候取决于会不会砍功能。
+
+---
+
+## 5.7 06_ARCHITECTURE_CODE_MAP.md
+
+用途：保证我真正理解 AI 写出的代码。
+
+```text
+System Architecture:
+
+Frontend:
+[Streamlit / Gradio / React / other]
+
+Backend:
+[Python functions / FastAPI / Flask / other]
+
+AI Layer:
+[Prompt pipeline / LLM API / IBM Bob-assisted code / Granite or other model]
+
+Data Layer:
+[CSV / JSON / sample files / database / local storage]
+
+Output:
+[Report / dashboard / recommendation / decision memo / action plan]
+
+Modules:
+
+Module:
+Purpose:
+Input:
+Output:
+Used By:
+Dependencies:
+Why This Library:
+Failure Cases:
+Test Method:
+Status:
+Understood / Needs Review / Risky
+```
+
+规则：任何 AI 生成的模块，只有当我能解释它的输入、输出、依赖和失败场景时，才能进入最终项目。
+
+---
+
+## 5.8 07_IBM_BOB_USAGE_LOG.md
+
+用途：证明 IBM Bob 是主要开发工具。
+
+```text
+Date:
+
+Task:
+
+Prompt Used in IBM Bob:
+
+Bob Output Summary:
+
+How I Used It:
+
+Manual Changes I Made:
+
+Result:
+
+Screenshot / Evidence:
+Yes / No
+```
+
+IBM Bob 应该参与整个开发生命周期，包括：
+
+* 架构规划
+* 代码生成
+* Debug
+* 重构
+* 测试辅助
+* 文档辅助
+* README 辅助
+* Demo 准备
+
+---
+
+## 5.9 08_CRITIQUE_TEST_LOG.md
+
+用途：存放红队批评、测试记录和 Bug 记录。
+
+```text
+Date:
+
+Reviewed Item:
+
+Reviewer:
+ChatGPT / DeepSeek / Claude / IBM Bob / Human
+
+Criticism:
+
+Severity:
+Low / Medium / High / Critical
+
+Decision:
+Kill / Pivot / Fix Now / Fix Later / Accept Risk / Ignore
+
+Action Taken:
+
+Result:
+```
+
+测试记录格式：
+
+```text
+Test Case:
+
+Input:
+
+Expected Output:
+
+Actual Output:
+
+Pass / Fail:
+
+Bug Found:
+
+Fix:
+
+Retest Result:
+```
+
+---
+
+# 6. 多 AI 分工系统
+
+每个 AI 工具必须有明确角色。
+
+| 工具                 | 角色        | 主要用途                |
+| ------------------ | --------- | ------------------- |
+| ChatGPT Project    | 总架构师与记忆中心 | 战略、文档整合、评分、项目结构     |
+| IBM Bob            | 主要开发工具    | 写代码、Debug、重构、测试辅助   |
+| Claude             | 代码与长文档审查  | 代码审查、README 审查、逻辑审查 |
+| DeepSeek           | 严厉红队      | 商业反驳、差异化压力测试、反自嗨    |
+| Web / Search Tools | 证据收集      | 市场研究、竞品研究、外部证据      |
+| 我自己                | 最终裁判      | 决策、简化、验证、提交         |
+
+规则：
+
+> 不要让每个 AI 都做同样的事。每个 AI 只承担自己的角色。
+
+---
+
+# 7. 证据防火墙协议
+
+为了防止多个 AI 形成虚假共识，不要把一个 AI 的夸奖、结论或情绪判断直接传递给另一个 AI。
+
+## 可以共享
+
+* 官方规则
+* 用户调研数据
+* 资料证据
+* 代码
+* 报错信息
+* 评分标准
+* 产品需求
+* 具体技术问题
+* 具体批评
+
+## 不应该共享
+
+* “另一个 AI 说这个想法很好”
+* “Claude 也同意”
+* “ChatGPT 觉得这个方向很强”
+* “DeepSeek 说 90% 值得采纳”
+* 情绪性描述
+* 没有证据支撑的结论
+
+## 安全转述格式
+
+```text
+Here is the project idea.
+Here are the official judging criteria.
+Here are the known constraints.
+Evaluate the idea independently.
+Do not assume it is good.
+Focus on weaknesses, risks, and concrete improvements.
+```
+
+---
+
+# 8. AI 行为规则
+
+在严肃项目对话开始时，使用以下指令：
+
+```text
+You are not here to encourage me. You are here to improve the project.
+
+Do not use generic praise such as “great idea,” “excellent,” “strong,” or “promising” unless you immediately support it with specific evidence.
+
+For every response, follow this structure:
+
+1. What is weak, unclear, risky, or underdeveloped?
+2. What assumptions am I making?
+3. What evidence supports or weakens this direction?
+4. What would a judge, user, or competitor criticize?
+5. What should be changed next?
+6. What should be killed, simplified, or delayed?
+
+Be direct. Prefer useful criticism over encouragement.
+```
+
+中文理解：
+
+> 不要鼓励我，要帮助我提高项目质量。
+> 不要空泛夸奖。
+> 先指出弱点、假设、风险和下一步修改方向。
+
+---
+
+# 9. Context Packet 系统
+
+使用两层上下文包。
+
+---
+
+## 9.1 Core Context Packet
+
+每次开启新的 AI 窗口时使用：
+
+```text
+I am building a solo project for the IBM AI Builders Challenge July 2026.
+
+Theme: Wildcard Challenge - Build Intelligent Systems for the Future of Work.
+
+Goal: Compete for first place by building a narrow, high-impact, working AI-powered workflow system. The project must use IBM Bob as the primary development tool, include AI as a core function, have a public GitHub repo, a clear README, and a public demo video under 3 minutes.
+
+Current phase: [phase]
+Current direction: [direction]
+
+Top risks:
+1. [risk]
+2. [risk]
+3. [risk]
+
+Your role in this conversation:
+[strategy critic / code reviewer / red team / product researcher / IBM Bob prompt helper]
+
+Rules:
+Do not praise. Separate facts, assumptions, and opinions. Identify weaknesses first. Give concrete fixes.
+```
+
+---
+
+## 9.2 Task Packet
+
+在 Core Context Packet 后使用：
+
+```text
+Task:
+[What I need you to do]
+
+Input:
+[Relevant code / idea / document / requirement]
+
+Output Format:
+[Table / checklist / critique / revised code / scorecard]
+
+Constraints:
+[Time, technology, challenge rules, scope]
+
+Do Not:
+[Do not rewrite everything / do not praise / do not suggest huge scope]
+```
+
+---
+
+# 10. 红队系统
+
+至少每周运行一次红队审查。
+所有重大决策前也要运行一次。
+
+---
+
+## 10.1 商业死亡测试
+
+```text
+Act as a skeptical business user.
+
+If I launched this tool today, why would a real user try it for 5 minutes and then say, "I don't need this"?
+
+List the top 5 reasons.
+
+For each reason, explain:
+- What user expectation is not being met
+- Whether this is a fatal issue
+- What feature, evidence, or positioning could fix it
+```
+
+目的：防止项目自嗨。
+
+---
+
+## 10.2 评委疲劳测试
+
+```text
+Act as a judge who has already reviewed 50 AI workflow, AI coworker, and productivity automation projects.
+
+Evaluate whether my project stands out.
+
+Answer:
+1. What one-sentence summary would the judge write for my project?
+2. Does that sentence sound generic?
+3. Which 3 projects would likely beat mine and why?
+4. What is the sharpest differentiator I currently have?
+5. What differentiator should I build or emphasize to reach top 3?
+```
+
+目的：防止项目变成普通 AI workflow 工具。
+
+---
+
+## 10.3 技术空心测试
+
+```text
+Act as a senior engineer reviewing this project.
+
+Determine whether this is a real AI-powered workflow system or just a thin wrapper around an LLM API.
+
+Evaluate:
+1. What non-AI workflow structure exists?
+2. What cognitive work does AI actually perform?
+3. Is there input processing, state management, validation, evidence checking, or structured output?
+4. What part would fail under real use?
+5. What should be built to make this technically more substantial within one month?
+```
+
+目的：防止技术上只是“API 套壳”。
+
+---
+
+## 10.4 Demo 失败测试
+
+```text
+Act as a live demo failure analyst.
+
+Assume my 3-minute demo fails or looks unimpressive.
+
+List the top 10 reasons this could happen.
+
+Classify each reason:
+- Technical failure
+- Product confusion
+- Weak story
+- Weak visual
+- AI output quality issue
+- Time management issue
+
+For each, give one prevention action.
+```
+
+目的：提前发现 3 分钟展示中的风险。
+
+---
+
+# 11. 强制自我推翻流程
+
+所有重大决策都要经过“假设自己错了”的流程。
+
+---
+
+## 11.1 项目方向推翻
+
+```text
+Here is my current project direction: [direction].
+
+First, argue for it briefly.
+
+Then assume this direction is wrong and will lose the competition.
+
+List the 3 most likely reasons it loses.
+
+Now design an alternative project direction that avoids those failure reasons.
+
+Compare the original and alternative direction across:
+- Technical execution
+- Innovation
+- Challenge fit
+- Feasibility
+- Real-world impact
+- Demo clarity
+
+End with a recommendation:
+Continue / Pivot / Hybrid / Kill
+```
+
+---
+
+## 11.2 架构推翻
+
+```text
+Here is my proposed architecture: [architecture].
+
+Assume a senior engineer reviews this and says it will fail during implementation or demo.
+
+Identify:
+1. The most fragile component
+2. The most unnecessary component
+3. The component most likely to cause delay
+4. The component that should be simplified
+5. The missing component that would improve trust or reliability
+
+Then propose a simpler architecture that preserves the core value.
+```
+
+---
+
+## 11.3 代码模块推翻
+
+```text
+Assume six months later a senior engineer finds a serious hidden bug in this module.
+
+Find the most likely hidden bug.
+
+Then analyze this module under:
+- Empty input
+- Malformed input
+- Very large input
+- Repeated calls
+- API failure
+- Unexpected model output
+- User misuse
+
+For each case, explain where the code may fail and how to guard against it.
+```
+
+---
+
+## 11.4 Demo 推翻
+
+```text
+Assume the judge watches my 3-minute demo and forgets it immediately.
+
+Why did that happen?
+
+Analyze:
+- Opening problem clarity
+- Visual impact
+- AI core visibility
+- Business value
+- Technical credibility
+- Differentiation
+- Closing message
+
+Then rewrite the demo structure to make it more memorable.
+```
+
+---
+
+# 12. 代码理解协议
+
+任何 AI 生成的代码，都必须通过以下流程。
+
+---
+
+## Step 1：IBM Bob 写代码或修改代码
+
+IBM Bob 是主要开发工具。
+
+---
+
+## Step 2：IBM Bob 解释代码
+
+```text
+Explain this module in detail.
+
+For each function, include:
+- Input type
+- Output type
+- Purpose
+- Key logic
+- Dependencies
+- Failure cases
+- How this connects to other modules
+```
+
+---
+
+## Step 3：第二个 AI 审查解释是否准确
+
+```text
+Review this code and the explanation below.
+
+Your task:
+1. Check whether the explanation accurately describes the code.
+2. Identify any incorrect explanation.
+3. Identify missing edge cases.
+4. Identify hidden assumptions.
+5. Identify where the code may fail.
+6. Suggest corrections to the explanation and code comments.
+
+Do not praise. Focus on accuracy.
+```
+
+---
+
+## Step 4：把审查意见发回 IBM Bob
+
+```text
+A code reviewer raised the following concerns about this module:
+
+[concerns]
+
+Please:
+1. Determine which concerns are valid.
+2. Modify the code if needed.
+3. Improve comments and docstrings.
+4. Add guardrails for edge cases.
+5. Explain what changed and why.
+```
+
+---
+
+## Step 5：人类三问测试
+
+任何模块进入主项目之前，我必须能回答：
+
+1. 这个函数或模块的具体输入类型是什么？
+2. 如果输入为空、格式错误、过大或异常，会发生什么？
+3. 这个模块的输出被哪个下游模块使用？如果输出格式错误，下游会怎样？
+
+---
+
+## Step 6：更新 Code Map
+
+把模块记录进 `06_ARCHITECTURE_CODE_MAP.md`。
+
+---
+
+# 13. 代码合并规则
+
+任何 AI 生成的代码，只有满足以下条件，才能进入最终项目：
+
+```text
+□ 我知道这个文件解决什么问题。
+□ 我知道每个主要函数的输入和输出。
+□ 我知道哪个模块会调用它。
+□ 我知道它最可能失败的地方。
+□ 我知道如何运行它。
+□ 我知道如何测试它。
+□ 我知道哪些参数可以安全修改。
+□ 我知道哪些地方不能随便改。
+```
+
+如果有两个以上无法打勾，代码不能继续堆功能，必须先理解。
+
+---
+
+15. 痛点验证与资料调研协议
+
+目标不是做大规模用户问卷，也不是做学术级市场研究。
+
+本项目采用更适合 solo 参赛者的验证方法：
+
+通过公开资料、行业报告、论文、论坛讨论、产品评论、竞品分析和少量真实反馈，快速判断某个工作流痛点是否真实、频繁、有商业价值，并适合在一个月内做成 AI prototype。
+
+15.1 调研目标
+
+调研的核心目标不是证明“我的想法很好”，而是回答：
+
+这个痛点是否真实存在？
+哪些人真的遇到这个痛点？
+这个痛点发生频率高不高？
+这个痛点是否会造成时间浪费、决策错误、沟通成本或商业损失？
+现有工具为什么没有完全解决？
+AI 是否真的能改善这个流程？
+这个问题是否适合做成 3 分钟 Demo？
+这个方向是否比普通 AI chatbot 更有差异化？
+15.2 主要资料来源
+
+优先使用以下资料来源，而不是依赖大规模问卷。
+
+1. 行业报告与商业研究
+
+用于判断宏观趋势和企业痛点。
+
+可搜索来源包括：
+
+McKinsey
+Deloitte
+PwC
+Gartner
+Forrester
+IBM
+Microsoft Work Trend Index
+Salesforce
+Asana Work Innovation Lab
+Slack Future of Work reports
+Atlassian research
+Harvard Business Review
+
+重点寻找：
+
+企业 AI adoption 痛点
+员工生产力问题
+AI 工具信任问题
+决策质量问题
+数据分析误读问题
+workflow automation 需求
+AI agent / AI coworker 的落地难点
+2. 学术论文与心理学 / 决策研究
+
+用于支持项目的认知层面价值。
+
+可搜索方向包括：
+
+decision-making bias
+cognitive bias in data analysis
+automation bias
+confirmation bias
+overreliance on AI
+human-AI collaboration
+explainable AI
+trust in AI systems
+AI hallucination and verification
+data storytelling errors
+dashboard misinterpretation
+
+重点不是堆论文，而是寻找能支持以下观点的证据：
+
+人类在数据解释和决策中容易犯系统性错误；
+AI 输出如果缺乏验证机制，可能放大错误；
+用户需要的不只是 AI 答案，而是可解释、可审查、可验证的工作流；
+人机协作比完全自动化更适合高风险决策场景。
+3. 论坛与真实用户讨论
+
+用于发现用户真实语言和真实抱怨。
+
+可搜索来源包括：
+
+Reddit
+Hacker News
+Product Hunt comments
+Stack Overflow
+GitHub Issues
+LinkedIn posts/comments
+Quora
+Medium comments
+YouTube product review comments
+SaaS 产品社区论坛
+
+重点寻找：
+
+用户抱怨 AI 工具太泛泛而谈；
+用户抱怨 AI 结果难以验证；
+用户抱怨工作流仍然断裂；
+用户抱怨 dashboard、报告、会议纪要、项目管理工具没有真正帮他们做决策；
+用户讨论某类工具“看起来有用但实际不好用”的原因。
+
+记录时要保留用户原话或核心意思，因为这些语言可以用于 Demo 和 README 的 problem statement。
+
+4. 竞品分析
+
+用于判断现有工具是否已经解决问题，以及我的项目能否做出差异化。
+
+可分析竞品包括：
+
+ChatGPT
+Claude
+Microsoft Copilot
+Notion AI
+Asana AI
+Monday.com AI
+ClickUp AI
+Jira AI
+Zapier Agents
+Airtable AI
+Tableau Pulse
+Power BI Copilot
+Grammarly
+Gamma
+Perplexity
+其他垂直 AI workflow 工具
+
+每个竞品分析时回答：
+
+Product:
+
+Target User:
+
+Main Workflow:
+
+What It Does Well:
+
+What It Does Poorly:
+
+User Complaints:
+
+Where It Feels Generic:
+
+Where Verification Is Weak:
+
+What Gap My Project Could Target:
+
+Can I Build a Smaller Focused Version in One Month?
+
+重点不是“我要打败这些大公司”，而是找到一个小而具体的切口：
+
+大产品覆盖很广，但某个细分工作流仍然不够可验证、不够结构化、不够适合初级用户或小团队。
+
+5. 少量真实反馈
+
+如果能问到 3-5 个人就足够有价值。
+
+对象可以是：
+
+数据分析同学
+做课程项目的同学
+实习同事
+做报告或 dashboard 的朋友
+做项目管理或团队协作的人
+使用过 AI 工具完成作业、实习或工作任务的人
+
+不要做长问卷，可以只问 5 个问题：
+
+1. 你最近一次用 AI 辅助学习或工作的任务是什么？
+
+2. 这次 AI 帮到了你什么？哪里没帮到？
+
+3. 你有没有担心 AI 的答案不准确、不完整或太泛泛？
+
+4. 如果 AI 能帮你改善一个具体工作流，你最希望它改善什么？
+
+5. 你会更信任哪种 AI 输出？
+   A. 直接给答案
+   B. 给答案 + 证据
+   C. 给答案 + 风险提示
+   D. 给答案 + 替代方案
+   E. 给答案 + 人工审核步骤
+
+这些反馈不能代表市场整体，但可以帮助验证项目叙事是否真实。
+
+15.3 资料记录模板
+
+所有资料统一记录到 03_RESEARCH_EVIDENCE.md。
+
+每条资料使用以下格式：
+
+Source:
+
+Source Type:
+Industry Report / Academic Paper / Forum Discussion / Product Review / Competitor Website / User Feedback
+
+Observed Pain Point:
+
+Evidence:
+
+What This Suggests:
+
+What This Does NOT Prove:
+
+Relevance to Candidate Idea:
+
+Reliability:
+High / Medium / Low
+
+Possible Project Implication:
+
+Use / Ignore / Revisit:
+
+重要要求：
+
+每条资料必须写 What This Does NOT Prove。
+
+例如：
+
+Evidence:
+Several Reddit users complain that AI meeting summaries miss important action items.
+
+What This Suggests:
+Some users experience quality problems with AI-generated meeting summaries.
+
+What This Does NOT Prove:
+It does not prove that all users need a new meeting assistant, or that this is the strongest project direction.
+
+这样可以防止自己过度解读资料。
+
+15.4 痛点证据分级
+
+不是所有资料价值一样。调研时按照证据强度分级。
+
+High Evidence
+
+符合以下条件之一：
+
+来自权威行业报告；
+来自同行评审论文；
+来自大量用户评论中反复出现的痛点；
+来自多个不同来源都指向同一问题；
+来自真实目标用户的直接反馈；
+能明确说明时间成本、错误成本或商业影响。
+Medium Evidence
+
+符合以下条件之一：
+
+来自单个产品评论；
+来自少量论坛讨论；
+来自非权威但内容具体的博客；
+来自个人经验，但和公开资料能对应；
+能说明痛点，但无法量化影响。
+Low Evidence
+
+符合以下条件之一：
+
+只是 AI 的推测；
+只是个人感觉；
+只有一两个零散评论；
+资料太旧；
+与目标用户不完全一致；
+只说明“有人感兴趣”，但不能说明“有人需要”。
+
+最终选题不能只依赖 Low Evidence。
+
+15.5 候选方向调研矩阵
+
+每个候选方向至少收集以下证据：
+
+Candidate Direction:
+
+Target User:
+
+Evidence from Industry Reports:
+1.
+2.
+
+Evidence from Papers / Research:
+1.
+2.
+
+Evidence from Forums / Reviews:
+1.
+2.
+3.
+
+Competitors:
+1.
+2.
+3.
+
+Main User Pain:
+
+Current Tool Gap:
+
+AI Opportunity:
+
+Risk of Being Generic:
+
+Evidence Strength:
+High / Medium / Low
+
+Decision:
+Keep / Kill / Revisit
+
+每个方向至少需要：
+
+2 条行业或商业资料；
+1 条论文或研究资料；
+3 条用户评论 / 论坛 / 产品评论；
+2-3 个竞品分析。
+
+如果一个方向找不到这些资料，说明它可能不是强方向，或者需要重新定义目标用户。
+
+15.6 网络资料搜索关键词
+
+根据不同方向，使用以下搜索关键词。
+
+AI Business Analyst Workflow Assistant
+AI data analysis assistant pain points
+business analysts struggle with data interpretation
+dashboard misinterpretation business users
+data storytelling mistakes
+AI for business analytics workflow
+why business users misread dashboards
+AI Decision Memo Generator with Evidence Check
+decision making bias in business
+AI decision support systems limitations
+business decision memo best practices
+human AI decision making trust
+AI hallucination decision support
+evidence-based decision making workplace
+AI Meeting-to-Execution System
+AI meeting summary action items problems
+meeting notes action items follow-up pain points
+project teams lose action items after meetings
+AI meeting assistant limitations
+meeting productivity research
+AI Work Quality Auditor
+AI writing tools trust issues
+AI generated reports quality problems
+how to verify AI output
+AI hallucination workplace documents
+automated quality review business reports
+human AI collaboration writing review
+AI Project Risk and Action Tracker
+project management risk tracking pain points
+AI project management assistant limitations
+why project tasks fall through cracks
+project risk identification AI
+team workflow automation pain points
+AI Data-to-Recommendation Assistant
+data analysis to business recommendation challenges
+analysts struggle to turn data into insights
+AI generated business recommendations trust
+data-driven decision making barriers
+analytics report recommendation quality
+15.7 调研输出要求
+
+Week 1 结束前，必须产出以下内容：
+
+1. 至少 4 个候选方向进入 Problem Bank。
+
+2. 每个候选方向都有至少 5 条外部证据。
+
+3. 每个候选方向至少分析 2 个竞品。
+
+4. 每个候选方向都有风险判断：
+   - 为什么它可能太普通？
+   - 为什么它可能做不完？
+   - 为什么用户可能不需要？
+   - 为什么 AI 可能不是核心？
+
+5. 最终选择一个方向，并写入 Decision Log。
+15.8 最终选题判断标准
+
+最终选题不能只根据“我喜欢”或“AI 推荐”。
+
+必须同时满足：
+
+□ 有真实痛点证据
+□ 有明确目标用户
+□ 有现有工具缺口
+□ AI 是核心组件
+□ 一个月可以做出 prototype
+□ 3 分钟 Demo 能讲清楚
+□ 能区别于普通 chatbot
+□ 能体现 Wildcard Challenge
+□ 能写进 GitHub README
+□ 能在技术上被我理解和控制
+
+如果一个方向缺少 3 项以上，不进入最终开发阶段。
+
+15.9 调研阶段的反幻觉规则
+
+调研时必须遵守：
+
+不把 AI 的推测当成事实。
+不把单个用户评论当成普遍需求。
+不把大公司报告中的宏观趋势直接等同于我的项目需求。
+不把“已有产品存在”理解成“这个方向没机会”。
+不把“没人做过”理解成“这个方向有价值”。
+不把“我能做出来”理解成“用户需要”。
+不把“AI 能生成结果”理解成“AI 解决了问题”。
+所有重要判断必须写清楚证据等级。
+
+---# 16. 每周执行计划
+
+## Phase 0：7 月开始前
+
+目标：建立项目操作系统。
+
+交付物：
+
+```text
+□ 创建 ChatGPT Project
+□ 创建 GitHub repo
+□ 创建 9 个核心文档
+□ 安装并测试 IBM Bob
+□ 开始或完成 SkillsBuild 学习
+□ 准备 Problem Bank 模板
+□ 准备红队 Prompt
+□ 列出初始研究方向
+```
+
+---
+
+## Week 1：问题发现与选题
+
+目标：确定项目方向。
+
+任务：
+
+```text
+□ 研究至少 4 个候选方向
+□ 收集竞品证据
+□ 收集用户反馈
+□ 给每个方向评分
+□ 运行红队审查
+□ 运行强制自我推翻
+□ 选择最终方向
+□ 写 Product Spec
+```
+
+Week 1 关卡：
+
+```text
+□ 目标用户清楚
+□ 痛点清楚
+□ 现有替代工具清楚
+□ AI 必要性清楚
+□ 3 分钟 Demo 场景清楚
+□ 一个月可行性清楚
+□ 主要风险已记录
+```
+
+---
+
+## Week 2：MVP 构建
+
+目标：做出可运行的核心工作流。
+
+任务：
+
+```text
+□ 构建输入流程
+□ 构建 AI 处理流程
+□ 构建结构化输出
+□ 构建第一版 UI
+□ 使用 IBM Bob 写代码和 Debug
+□ 记录 IBM Bob 使用过程
+□ 创建架构图 / Code Map
+□ 测试核心流程
+```
+
+Week 2 关卡：
+
+```text
+□ 用户可以输入内容
+□ 系统可以处理输入
+□ AI 可以生成结构化输出
+□ 输出不是普通聊天文本
+□ 一个完整流程可以跑通
+□ 主要模块已经解释清楚
+```
+
+---
+
+## Week 3：可信度、验证机制与产品增强
+
+目标：让项目从普通 AI 工具变成可信 AI 工作系统。
+
+任务：
+
+```text
+□ 加入证据或假设展示
+□ 加入风险提示
+□ 加入人工审核点
+□ 加入错误处理
+□ 加入 sample data 或 sample case
+□ 尽可能做用户测试
+□ 运行红队审查
+□ 修复关键弱点
+```
+
+Week 3 关卡：
+
+```text
+□ 输出包含验证层
+□ AI 限制是可见的
+□ Demo 流程稳定
+□ 主要 Bug 已记录并修复
+□ 项目有清楚差异化
+```
+
+---
+
+## Week 4：最终提交
+
+目标：打磨并提交。
+
+任务：
+
+```text
+□ 完成 README
+□ 完成公开 GitHub repo
+□ 录制 3 分钟以内 Demo 视频
+□ 清楚解释 IBM Bob 使用方式
+□ 添加架构图
+□ 添加截图
+□ 测试安装说明
+□ 运行最终红队审查
+□ 提交项目页面
+```
+
+Week 4 关卡：
+
+```text
+□ GitHub 公开
+□ README 完整
+□ Demo 视频公开且少于 3 分钟
+□ IBM Bob 使用过程有记录
+□ 没有泄露 API key
+□ App 能根据说明运行
+□ 主题清楚写明
+□ 最终提交完成
+```
+
+---
+
+# 17. 日常 / 两日工作节奏
+
+不要过度记录每天所有事情。
+使用低负担节奏。
+
+---
+
+## 17.1 五秒决策速记
+
+每次做重要决定时，只记录一句：
+
+```text
+日期 - 决策 - 原因
+```
+
+例子：
+
+```text
+0705 - 保留 AI Decision Memo 方向 - 比普通 meeting summary 更贴合 decision support
+```
+
+---
+
+## 17.2 每两天 Mini Sync
+
+```text
+What changed:
+
+Current biggest risk:
+
+Next action:
+```
+
+---
+
+## 17.3 阶段更新
+
+每个阶段结束时，更新：
+
+* `00_CORE_CONTEXT.md`
+* `04_DECISION_LOG.md`
+* `08_CRITIQUE_TEST_LOG.md`
+
+---
+
+# 18. AI 输出质量评分
+
+任何 AI 输出进入项目知识库前，都要评分。
+
+| 维度    | 0    | 1     | 2       |
+| ----- | ---- | ----- | ------- |
+| 具体性   | 空泛   | 部分具体  | 可以直接执行  |
+| 批判性   | 只认同  | 有弱点   | 有强反驳    |
+| 证据意识  | 无证据  | 有部分假设 | 区分事实和假设 |
+| 可操作性  | 不能用  | 需要重写  | 可直接使用   |
+| 风险意识  | 无风险  | 泛泛风险  | 明确失败场景  |
+| 比赛贴合度 | 泛用建议 | 部分相关  | 完全贴合比赛  |
+
+规则：
+
+* **低于 8 / 12：** 不进入项目知识库。
+* **8-10 / 12：** 修改后再使用。
+* **11-12 / 12：** 可以使用。
+
+---
+
+# 19. 认知陷阱检查表
+
+每两天检查一次。
+
+```text
+1. 我是不是因为 AI 夸了这个想法，就相信它好？
+2. 我是不是把“能做出来”误认为“有价值”？
+3. 我是不是在堆功能，而不是解决痛点？
+4. 我是不是在使用技术名词，但技术本身没有实质？
+5. 我是不是在逃避用户验证？
+6. 我是不是低估了 Demo 的重要性？
+7. 我是不是没有记录 IBM Bob 的实际使用？
+8. 我是不是偏离了 Wildcard 主题？
+9. 我是否能用一句话说清项目差异化？
+10. 我是否有证据证明这个问题真实存在？
+```
+
+如果有 3 个以上答案是 “yes”，需要暂停推进，先修正方向。
+
+---
+
+# 20. Demo 哲学
+
+Demo 必须展示“转变”。
+
+弱 Demo：
+
+```text
+这里有一个工具。
+它用了 AI。
+它能回答问题。
+```
+
+强 Demo：
+
+```text
+Before:
+一个真实工作流混乱、低效、容易出错。
+
+During:
+AI 系统整理输入、识别风险、生成有用输出，并支持人工审核。
+
+After:
+用户得到更清楚、更快、更可靠的工作成果。
+```
+
+---
+
+## 3 分钟 Demo 结构
+
+```text
+0:00 - 0:20 问题介绍
+0:20 - 0:40 为什么现有工具不够
+0:40 - 1:40 产品现场演示
+1:40 - 2:10 AI 工作流与架构
+2:10 - 2:40 商业影响
+2:40 - 3:00 总结与主题贴合
+```
+
+---
+
+# 21. README 结构
+
+最终 README 应包含：
+
+```text
+# Project Name
+
+## Selected Challenge Theme
+Wildcard Challenge - Build Intelligent Systems for the Future of Work
+
+## Problem Statement
+
+## Target User
+
+## Solution Overview
+
+## Core Workflow
+
+## AI Approach
+
+## Architecture
+
+## How IBM Bob Was Used
+
+## Features
+
+## Demo
+
+## Installation and Setup
+
+## Example Use Case
+
+## Technical Stack
+
+## Limitations
+
+## Future Improvements
+
+## Team
+Zhe Wang - Solo participant
+```
+
+---
+
+# 22. MVP 技术哲学
+
+作为 solo 参赛者，不要过度复杂化技术栈。
+
+推荐：
+
+| 层级            | 推荐选择                                               |
+| ------------- | -------------------------------------------------- |
+| UI            | Streamlit / Gradio                                 |
+| Backend       | Python functions / FastAPI                         |
+| Data          | CSV / JSON / local files                           |
+| Visualization | Plotly / Matplotlib                                |
+| AI Logic      | Prompt pipeline / structured output                |
+| Documentation | Markdown                                           |
+| Deployment    | Streamlit Cloud / Hugging Face Spaces / local demo |
+
+尽量避免：
+
+* Kubernetes
+* 复杂登录系统
+* 多用户数据库
+* 微服务架构
+* 过多 agents
+* 过度复杂的 LangGraph pipeline
+* 复杂企业级部署
+
+---
+
+# 23. 最终提交检查表
+
+```text
+Competition:
+□ 选择了正确 challenge
+□ 每月只提交一个项目
+□ SkillsBuild required activity 已完成
+
+IBM Bob:
+□ IBM Bob 是主要开发工具
+□ IBM Bob 使用过程有记录
+□ README 清楚说明 IBM Bob 如何使用
+□ 尽可能保存截图或日志
+
+GitHub:
+□ Repository 是 public
+□ README 完整
+□ Setup instructions 清楚
+□ 没有 private API keys
+□ 包含 sample data
+□ 架构说明清楚
+
+Prototype:
+□ 核心工作流可以运行
+□ Demo 场景已测试
+□ 有基本错误处理
+□ 输出是结构化的
+□ AI 是核心功能
+
+Video:
+□ 视频链接公开
+□ 少于 3 分钟
+□ 快速说明问题
+□ 产品演示清楚
+□ AI 架构有解释
+□ 商业价值明确
+□ 结尾有力
+
+Quality:
+□ 已完成红队审查
+□ 已完成技术空心测试
+□ 已完成 Demo 失败测试
+□ 主要风险已处理
+□ 最终评分表已更新
+```
+
+---
+
+# 24. 紧急规则
+
+如果时间不够，优先级如下：
+
+## Priority 1：Working Demo
+
+一个小而稳定的可运行产品，胜过一个大而未完成的产品。
+
+## Priority 2：Clear README
+
+评委必须能不问你问题就理解项目。
+
+## Priority 3：Clear Demo Video
+
+价值必须能在 3 分钟内看见。
+
+## Priority 4：IBM Bob Usage Proof
+
+因为官方要求 IBM Bob 是主要开发工具。
+
+## Priority 5：Differentiation
+
+必须讲清楚为什么这不是普通 chatbot。
+
+最后 72 小时不要加新功能，除非它修复的是致命问题。
+
+---
+
+# 25. 最终执行声明
+
+这个项目由证据、批判和执行驱动。
+
+AI 工具用于加速思考、研究、代码、测试和文档。
+AI 不替代最终判断。
+
+项目必须始终保持：
+
+```text
+Narrow
+Useful
+Verifiable
+Demoable
+Technically controlled
+Commercially meaningful
+Clearly aligned with the Wildcard Challenge
+```
+
+目标是第一名，但通往第一名的路径不是自嗨，也不是堆功能。
+路径是：
+
+```text
+严谨选题
++
+真实痛点
++
+AI 辅助高效执行
++
+强红队批判
++
+清楚证据
++
+可运行产品
++
+优秀 Demo
+```
+
+最终目标：做出一个真正能展示未来工作智能系统价值的 AI 项目。
