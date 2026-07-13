@@ -912,3 +912,64 @@ class HealthFindingCandidate(ContractModel):
             self.source_format, self.source_locator, "HealthFindingCandidate"
         )
         return self
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — DataHealthSummary (added here as part of the first vertical slice)
+# ---------------------------------------------------------------------------
+
+
+class DataHealthSummary(ContractModel):
+    """Summary of deterministic data-health metrics for a tabular source.
+
+    Produced by data_health.py.  Does NOT contain evidence_id values.
+    Evidence minting happens downstream in evidence_builder.py.
+
+    readiness_score is intentionally absent: no defensible scoring method
+    has been approved.  It is deferred until a scoring method is reviewed.
+    """
+
+    source_id: str = Field(
+        ...,
+        description="source_id of the CSV or tabular source that was analyzed",
+    )
+    row_count: int = Field(..., ge=0, description="Total number of rows in the source")
+    column_count: int = Field(..., ge=0, description="Total number of columns in the source")
+    duplicate_row_count: int = Field(
+        ...,
+        ge=0,
+        description="Number of fully duplicated rows (all columns identical)",
+    )
+    missing_value_rates: dict[str, float] = Field(
+        default_factory=dict,
+        description="Per-column fraction of missing values (0.0–1.0)",
+    )
+    columns_with_mixed_types: list[str] = Field(
+        default_factory=list,
+        description="Column names where multiple Python types are detected",
+    )
+    constant_columns: list[str] = Field(
+        default_factory=list,
+        description="Column names where all non-null values are identical",
+    )
+    schema_issues: list[str] = Field(
+        default_factory=list,
+        description="Structured schema issue descriptions (e.g. unnamed columns)",
+    )
+
+    @field_validator("source_id")
+    @classmethod
+    def _validate_source_id_field(cls, v: str) -> str:
+        return _validate_source_id(v)
+
+    @field_validator("missing_value_rates")
+    @classmethod
+    def _validate_missing_value_rates(cls, v: dict) -> dict:
+        for col, rate in v.items():
+            if not isinstance(col, str):
+                raise ValueError("missing_value_rates keys must be str column names")
+            if not isinstance(rate, float) or not (0.0 <= rate <= 1.0):
+                raise ValueError(
+                    f"missing_value_rates[{col!r}] must be a float in [0.0, 1.0], got {rate!r}"
+                )
+        return v
