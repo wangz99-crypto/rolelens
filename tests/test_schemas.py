@@ -1246,60 +1246,69 @@ class TestAdditionalEdgeCases:
 # ---------------------------------------------------------------------------
 
 
-class TestValidateAssignment:
+class TestFrozenModels:
+    """Tests that ContractModel subclasses are fully immutable (frozen=True).
+
+    frozen=True replaces validate_assignment=True.  Any attempt to assign a
+    field after construction raises ValidationError.  Revised objects must be
+    reconstructed and re-validated rather than mutated in place.
+    """
+
     def test_invalid_source_id_assignment_rejected(self):
-        """Assigning an invalid source_id after construction must raise ValidationError."""
+        """Assigning any field on a frozen SourceManifestEntry raises ValidationError."""
         entry = SourceManifestEntry(**_valid_source_manifest())
         with pytest.raises(ValidationError):
             entry.source_id = "bad"
 
-    def test_valid_source_id_assignment_accepted(self):
-        """Assigning a valid source_id after construction is accepted."""
+    def test_valid_source_id_assignment_also_rejected(self):
+        """Even a valid assignment is rejected because models are frozen.
+
+        Revised objects must be reconstructed via SourceManifestEntry(**changes).
+        """
         entry = SourceManifestEntry(**_valid_source_manifest())
-        entry.source_id = "src-csv-aabbccddee11"
-        assert entry.source_id == "src-csv-aabbccddee11"
+        with pytest.raises(ValidationError):
+            entry.source_id = "src-csv-aabbccddee11"
 
     def test_blank_id_algo_version_assignment_rejected_on_evidence(self):
-        """Assigning a blank id_algo_version to EvidenceObject must raise ValidationError."""
+        """Any assignment to EvidenceObject raises ValidationError (frozen)."""
         obj = EvidenceObject(**_valid_evidence_object())
-        with pytest.raises(ValidationError, match="id_algo_version"):
+        with pytest.raises(ValidationError):
             obj.id_algo_version = ""
 
     def test_whitespace_id_algo_version_assignment_rejected_on_evidence(self):
         obj = EvidenceObject(**_valid_evidence_object())
-        with pytest.raises(ValidationError, match="id_algo_version"):
+        with pytest.raises(ValidationError):
             obj.id_algo_version = "   "
 
     def test_blank_roles_assignment_rejected_on_health_candidate(self):
-        """Assigning relevant_roles=[""] after construction must raise ValidationError."""
+        """Assignment to HealthFindingCandidate is rejected (frozen)."""
         candidate = HealthFindingCandidate(**_valid_health_candidate())
-        with pytest.raises(ValidationError, match="blank role names"):
+        with pytest.raises(ValidationError):
             candidate.relevant_roles = [""]
 
     def test_incompatible_format_assignment_rejected_on_evidence(self):
-        """Assigning an incompatible source_format to an existing EvidenceObject raises
-        ValidationError (format/locator compatibility re-checked on assignment).
+        """Assigning an incompatible source_format to a frozen EvidenceObject raises
+        ValidationError.  With frozen=True, even valid same-value assignments fail.
 
-        Note: validate_assignment re-runs field validators but not model validators.
-        Cross-field model validators do NOT re-run on single-field assignment.
-        This test documents the current behavior: assignment of source_format alone
-        does not trigger the cross-field compatibility check.
-        Assigning both source_format and source_locator together requires reconstruction.
+        Revised objects must be reconstructed and validated rather than mutated.
+        Cross-field checks (format/locator compatibility) run on full reconstruction,
+        not on individual field assignment.
         """
         obj = EvidenceObject(**_valid_evidence_object(
             source_format=SourceFormat.csv,
             source_locator=_tabular_locator(),
         ))
-        # Assigning just source_format does not re-run the cross-field model_validator
-        # because validate_assignment only re-runs field_validators for the assigned field.
-        # This is a known Pydantic v2 behavior: model_validators do not re-run
-        # on single-field assignment. A full rebuild is required for cross-field
-        # validation on assignment. This is documented, not a defect.
-        # The test below confirms assignment does not crash unexpectedly.
-        obj.source_format = SourceFormat.csv  # same value — always valid
+        # frozen=True rejects all post-construction assignment, including same-value.
+        with pytest.raises(ValidationError):
+            obj.source_format = SourceFormat.csv
 
-    def test_model_not_left_in_invalid_state_after_failed_assignment(self):
-        """A failed assignment must not corrupt the model's existing valid value."""
+    def test_model_remains_valid_and_unchanged_after_failed_assignment(self):
+        """A failed assignment must not corrupt the model's existing valid value.
+
+        With frozen=True, no assignment succeeds, so the model is always unchanged.
+        This verifies the invariant: after any assignment attempt (caught or not),
+        the original value is still present.
+        """
         entry = SourceManifestEntry(**_valid_source_manifest())
         original_id = entry.source_id
         try:
@@ -1307,8 +1316,23 @@ class TestValidateAssignment:
         except Exception:
             pass
         assert entry.source_id == original_id, (
-            "Failed assignment must not alter the existing valid field value"
+            "Model must remain unchanged after failed assignment"
         )
+
+    def test_cross_field_incompatible_assignment_impossible(self):
+        """Assigning a mismatched source_format to an EvidenceObject is impossible.
+
+        Because frozen=True, no field can be changed after construction.  An
+        incompatible cross-field state can only be reached by constructing a new
+        model with mismatched inputs — which is rejected by the model_validator.
+        This test verifies that reconstruction with incompatible format+locator fails.
+        """
+        with pytest.raises(ValidationError):
+            # pasted_text requires TextSourceLocator, not TabularSourceLocator.
+            EvidenceObject(**_valid_evidence_object(
+                source_format=SourceFormat.pasted_text,
+                source_locator=_tabular_locator(),
+            ))
 
 
 # ---------------------------------------------------------------------------

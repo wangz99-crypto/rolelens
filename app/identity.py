@@ -8,15 +8,15 @@ Responsibilities:
   - Produce a full SHA-256 identity_digest for collision detection.
   - Serialize SourceLocator and rule-parameter dicts into a deterministic
     canonical string suitable as an identity input.
-  - Raise IdentityCollisionError when a short ID matches an existing entry
-    but the full identity_digest differs.
+  - Provide check_identity_collision() for registry-aware collision detection.
+    The generators themselves are pure functions; collision checking is explicit.
 
 Architecture invariants enforced here:
   - Identity generation belongs ONLY in this module.
   - utils.py, schemas.py, data_health.py, and evidence_builder.py must NOT
     perform hashing or ID construction independently.
-  - No in-memory-only collision registry: callers must persist (short_id,
-    identity_digest) pairs and pass the known digest when checking collisions.
+  - Generators are pure: they never consult a registry; callers invoke
+    check_identity_collision() separately.
   - Free-form 'finding' and 'explanation' text are NOT identity inputs.
   - Normalization is order-preserving: no row, column, section, or key
     reordering is applied beyond JSON key-sort for dict canonicalization.
@@ -32,7 +32,7 @@ import hashlib
 import json
 import re
 import unicodedata
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Mapping
 
 if TYPE_CHECKING:
     # Avoid a circular import at runtime; schemas imports nothing from identity.
@@ -49,14 +49,17 @@ if TYPE_CHECKING:
 IDENTITY_ALGO_VERSION: str = "v1"
 
 #: Number of hex characters taken from the SHA-256 digest to form the short ID
-#: suffix.  12 hex chars = 48 bits of entropy.  Collision probability at
-#: 1 million entries ≈ 1.7 × 10⁻⁷ (birthday bound).  Acceptable for V1.
+#: 12 hex chars = 48 bits of entropy. At 1 million entries, the
+#: birthday-bound probability of at least one short-ID collision is
+#: approximately 1.8 × 10⁻³ (0.18%). Full digests and registry checks
+#: therefore remain mandatory.
 _SHORT_HEX_LEN: int = 12
 
 #: Stable mapping from SourceFormat value to a safe, short abbreviation used
 #: in the source_id prefix.  Must match the regex [a-z0-9_]{1,12}.
 #: Adding a new SourceFormat REQUIRES a new entry here before that format can
 #: produce a source_id.
+#: pdf_text is NOT included: it is not an active SourceFormat in V1.
 _FORMAT_ABBREV: dict[str, str] = {
     "csv":         "csv",
     "excel":       "xls",
@@ -64,9 +67,6 @@ _FORMAT_ABBREV: dict[str, str] = {
     "txt":         "txt",
     "markdown":    "md",
     "form_input":  "form",
-    # pdf_text is delayed optional; include now so intake cannot silently fall
-    # through to the _unknown branch if it is ever mistakenly passed.
-    "pdf_text":    "pdf",
 }
 
 #: Regex that a format_abbrev must satisfy (mirrors _SOURCE_ID_RE middle group).
@@ -76,6 +76,13 @@ _ABBREV_RE = re.compile(r"^[a-z0-9_]{1,12}$")
 # appear naturally in any of the identity fields.
 _SEP = "|"
 
+# Compiled regexes for public-API input validation (mirrored from schemas.py).
+_SOURCE_ID_RE = re.compile(r"^src-[a-z0-9_]{1,12}-[0-9a-f]{12}$")
+_ID_ALGO_VERSION_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,31}$")
+_EVIDENCE_TYPE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_CLAIM_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$")
+_CLAIM_KEY_MAX_LEN = 128
+
 
 # ---------------------------------------------------------------------------
 # Exceptions
@@ -83,8 +90,7 @@ _SEP = "|"
 
 
 class IdentityCollisionError(Exception):
-    """Raised when a newly computed short ID matches an existing entry whose
-    full identity_digest is different from the newly computed digest.
+    """Raised when a short ID is already registered under a different identity_digest.
 
     This indicates a 48-bit hash collision in the short ID suffix, which is an
     extremely rare event.  The caller must NOT silently resolve this: it must
@@ -161,13 +167,13 @@ def normalize_source_content(raw: str | bytes) -> str:
 
 
 def _canonical_json(value: Any) -> str:
-    """Return a deterministic JSON string for a dict or list value.
+    """Return a deterministic compact JSON string for a value.
 
     Rules:
       - dict keys are recursively sorted (all nesting depths).
-      - No indentation or trailing spaces.
-      - ensure_ascii=True for cross-platform byte-level determinism.
-      - NaN and Infinity are rejected by json.dumps default (allow_nan=False).
+      - No indentation or trailing spaces (compact separators).
+      - ensure_ascii=False for Unicode-preserving identity inputs.
+      - allow_nan=False: NaN and Infinity are rejected.
 
     Args:
         value: A JSON-serializable value (dict, list, str, int, float, bool,
@@ -180,14 +186,77 @@ def _canonical_json(value: Any) -> str:
         TypeError: If value contains a non-JSON-serializable type.
         ValueError: If value contains NaN or Infinity floats.
     """
-    return json.dumps(value, sort_keys=True, ensure_ascii=True, allow_nan=False)
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+
+
+def _validate_json_params(value: Any, path: str = "root") -> None:
+    """Recursively validate that a value is JSON-compatible for rule parameters.
+
+    Allowed leaf types: None, bool, int, finite float, str.
+    Allowed container types: list, dict with str keys only.
+
+    Rejected at every nesting level:
+      - non-string dict keys
+      - tuple, set, frozenset
+      - bytes, bytearray
+      - complex
+      - NaN, +Infinity, -Infinity
+      - any other custom object
+
+    Args:
+        value: The value to validate.
+        path:  Human-readable path string for error messages.
+
+    Raises:
+        ValueError: If value contains a non-JSON-compatible type or non-finite float.
+    """
+    import math
+
+    if value is None or isinstance(value, bool) or isinstance(value, str):
+        return
+    if isinstance(value, int):
+        # bool is a subclass of int — already handled above.
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(
+                f"canonicalize_rule_parameters: non-finite float {value!r} "
+                f"at {path}; NaN, Infinity, and -Infinity are not valid JSON values"
+            )
+        return
+    if isinstance(value, list):
+        for i, item in enumerate(value):
+            _validate_json_params(item, path=f"{path}[{i}]")
+        return
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if not isinstance(k, str):
+                raise ValueError(
+                    f"canonicalize_rule_parameters: dict key must be str, "
+                    f"got {type(k).__name__!r} at {path}"
+                )
+            _validate_json_params(v, path=f"{path}.{k}")
+        return
+    # Anything else: tuple, set, frozenset, bytes, bytearray, complex, custom…
+    raise ValueError(
+        f"canonicalize_rule_parameters: unsupported type {type(value).__name__!r} "
+        f"at {path}; only None, bool, int, finite float, str, list, and "
+        f"dict with string keys are permitted"
+    )
 
 
 def canonicalize_locator(locator: Any) -> str:
     """Serialize a SourceLocator (Pydantic model) into a canonical string.
 
-    Uses the model's .model_dump() output (which is a plain dict), then
-    applies _canonical_json for deterministic key-sorted JSON.
+    All inputs — both Pydantic models and plain dicts — are validated through
+    TypeAdapter(SourceLocator) before canonicalization, so that arbitrary
+    Pydantic models are rejected.
 
     The locator_type discriminator field is included in the output so that
     TabularSourceLocator and TextSourceLocator with identical non-type fields
@@ -195,39 +264,60 @@ def canonicalize_locator(locator: Any) -> str:
 
     Args:
         locator: A SourceLocator instance (TabularSourceLocator,
-                 TextSourceLocator, or UserContextLocator).  Also accepts a
-                 plain dict for testing convenience.
+                 TextSourceLocator, or UserContextLocator) OR a plain dict
+                 that conforms to one of those subtypes.
 
     Returns:
         Canonical JSON string suitable as an identity input.
+
+    Raises:
+        TypeError:        If locator is not a Pydantic model or dict.
+        ValidationError:  If the locator fails SourceLocator schema validation.
     """
+    from pydantic import TypeAdapter
+    from app.schemas import SourceLocator as _SourceLocator
+
+    _ta = TypeAdapter(_SourceLocator)
+
     if hasattr(locator, "model_dump"):
-        locator_dict = locator.model_dump()
+        # Validate the model through TypeAdapter — rejects arbitrary BaseModel
+        # subclasses that are not valid SourceLocator members.
+        validated = _ta.validate_python(locator.model_dump())
     elif isinstance(locator, dict):
-        locator_dict = locator
+        validated = _ta.validate_python(locator)
     else:
         raise TypeError(
-            f"canonicalize_locator requires a Pydantic model or dict, "
+            f"canonicalize_locator requires a SourceLocator Pydantic model or dict, "
             f"got {type(locator).__name__!r}"
         )
-    return _canonical_json(locator_dict)
+    return _canonical_json(validated.model_dump())
 
 
 def canonicalize_rule_parameters(params: dict[str, Any]) -> str:
     """Serialize canonical_rule_parameters into a deterministic string.
 
+    Requires a dict and recursively validates that all keys are str and all
+    values are JSON-compatible (None, bool, int, finite float, str, list, or
+    dict with string keys).  Rejects at every nesting level: non-string dict
+    keys, tuple, set, frozenset, bytes, bytearray, complex, NaN, Infinity, and
+    arbitrary custom objects.
+
     Args:
-        params: A dict that has already passed HealthFindingCandidate
-                canonical_rule_parameters validation (no NaN, no Infinity,
-                no non-JSON types).
+        params: A dict with string keys and recursively JSON-compatible values.
 
     Returns:
-        Canonical JSON string.
+        Canonical compact JSON string (keys sorted, no whitespace).
 
     Raises:
-        TypeError: If params contains a non-JSON-serializable type.
-        ValueError: If params contains NaN or Infinity.
+        ValueError: If params is not a dict, or contains a non-string key or
+                    an unsupported / non-finite value at any nesting depth.
     """
+    if not isinstance(params, dict):
+        raise ValueError(
+            f"canonicalize_rule_parameters: expected a dict, "
+            f"got {type(params).__name__!r}"
+        )
+    _validate_json_params(params, path="root")
     return _canonical_json(params)
 
 
@@ -269,32 +359,68 @@ def _format_abbrev(source_format_value: str) -> str:
 
 
 def _evidence_type_abbrev(evidence_type_key: str) -> str:
-    """Derive a stable, safe abbreviation from an evidence_type_key.
+    """Derive a stable abbreviation from an already-valid evidence_type_key.
 
-    The abbreviation is the first 12 characters of the key, lowercased,
-    with any character outside [a-z0-9_] replaced by '_'.  This matches
-    the regex [a-z0-9_]{1,12} required by the evidence_id format.
-
-    Because evidence_type_key is already validated by _EVIDENCE_TYPE_RE
-    (^[a-z][a-z0-9_]{0,63}$), only alphanumeric characters and underscores
-    are present; the sanitization step is a belt-and-suspenders guard.
+    Truncates the first 12 characters of the key.  Because evidence_type_key
+    is validated by _EVIDENCE_TYPE_RE (^[a-z][a-z0-9_]{0,63}$) before this
+    function is called, only lowercase alphanumerics and underscores are
+    present.  No character replacement is performed: the caller must not pass
+    invalid keys.
 
     Args:
-        evidence_type_key: A validated evidence_type string.
+        evidence_type_key: A validated evidence_type string (all lowercase,
+                           starts with [a-z], contains only [a-z0-9_]).
 
     Returns:
         1–12 character abbreviation.
 
     Raises:
-        ValueError: If the key is empty after sanitization.
+        ValueError: If the key is empty.
     """
-    sanitized = re.sub(r"[^a-z0-9_]", "_", evidence_type_key.lower())
-    abbrev = sanitized[:_SHORT_HEX_LEN]
-    if not abbrev:
+    if not evidence_type_key:
         raise ValueError(
-            f"evidence_type_key {evidence_type_key!r} produced an empty abbreviation."
+            "evidence_type_key must not be empty."
         )
-    return abbrev
+    return evidence_type_key[:_SHORT_HEX_LEN]
+
+
+# ---------------------------------------------------------------------------
+# Public API: check_identity_collision
+# ---------------------------------------------------------------------------
+
+
+def check_identity_collision(
+    short_id: str,
+    identity_digest: str,
+    existing_identities: Mapping[str, str],
+) -> None:
+    """Check a (short_id, identity_digest) pair against a registry.
+
+    Registry rules:
+      - short_id absent from registry: no error.
+      - short_id present with the same digest: no error (same identity).
+      - short_id present with a different digest: IdentityCollisionError.
+
+    Two different short IDs are never reported as a collision, regardless of
+    their digest values.
+
+    Args:
+        short_id:             The short ID to check (src-… or ev-…).
+        identity_digest:      The newly computed full SHA-256 digest.
+        existing_identities:  A mapping of short_id → identity_digest
+                              representing the current registry state.
+
+    Raises:
+        IdentityCollisionError: If short_id is registered under a different
+                                identity_digest.
+    """
+    existing = existing_identities.get(short_id)
+    if existing is not None and existing != identity_digest:
+        raise IdentityCollisionError(
+            short_id=short_id,
+            existing_digest=existing,
+            new_digest=identity_digest,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +434,6 @@ def generate_source_id(
     semantic_context_category: str,
     normalized_content: str,
     id_algo_version: str = IDENTITY_ALGO_VERSION,
-    existing_digest: str | None = None,
 ) -> tuple[str, str]:
     """Generate a stable hybrid source_id and full SHA-256 identity_digest.
 
@@ -317,16 +442,18 @@ def generate_source_id(
 
     Short ID format: src-{format_abbrev}-{first_12_hex_of_digest}
 
+    All inputs are validated before hashing:
+      - source_format must be a registered active SourceFormat value.
+      - semantic_context_category must be a valid SemanticContextCategory value.
+      - id_algo_version must match ^[a-z0-9][a-z0-9._-]{0,31}$.
+      - normalized_content must be a str.
+
     Args:
         source_format:            SourceFormat enum value string (e.g. "csv").
         semantic_context_category: SemanticContextCategory enum value string.
         normalized_content:       Already-normalized source content string
                                   (call normalize_source_content first).
         id_algo_version:          Identity algorithm version tag.  Default "v1".
-        existing_digest:          If the caller has previously stored a digest
-                                  for this short_id, pass it here to trigger
-                                  IdentityCollisionError if it differs from the
-                                  newly computed digest.
 
     Returns:
         (source_id, identity_digest) where:
@@ -334,10 +461,44 @@ def generate_source_id(
           - identity_digest is the full 64-char lowercase SHA-256 hex string
 
     Raises:
-        ValueError: If source_format has no registered abbreviation.
-        IdentityCollisionError: If existing_digest is provided and differs from
-                                the newly computed digest.
+        ValueError: If any input fails validation.
     """
+    # --- Validate inputs ---
+    from app.schemas import SourceFormat as _SourceFormat, SemanticContextCategory as _SCC
+
+    # source_format must be a registered active SourceFormat.
+    try:
+        _SourceFormat(source_format)
+    except ValueError:
+        raise ValueError(
+            f"source_format {source_format!r} is not a valid active SourceFormat value. "
+            f"Valid values: {[m.value for m in _SourceFormat]}"
+        )
+
+    # semantic_context_category must be a valid SemanticContextCategory.
+    try:
+        _SCC(semantic_context_category)
+    except ValueError:
+        raise ValueError(
+            f"semantic_context_category {semantic_context_category!r} is not a valid "
+            f"SemanticContextCategory value. "
+            f"Valid values: {[m.value for m in _SCC]}"
+        )
+
+    # id_algo_version must match the approved syntax.
+    if not _ID_ALGO_VERSION_RE.match(id_algo_version):
+        raise ValueError(
+            f"id_algo_version must match ^[a-z0-9][a-z0-9._-]{{0,31}}$, "
+            f"got: {id_algo_version!r}"
+        )
+
+    # normalized_content must be a str.
+    if not isinstance(normalized_content, str):
+        raise ValueError(
+            f"normalized_content must be a str, got {type(normalized_content).__name__}"
+        )
+
+    # --- Build short ID ---
     abbrev = _format_abbrev(source_format)
 
     identity_input = _SEP.join([
@@ -349,13 +510,6 @@ def generate_source_id(
 
     digest = _sha256_hex(identity_input)
     short_id = f"src-{abbrev}-{digest[:_SHORT_HEX_LEN]}"
-
-    if existing_digest is not None and existing_digest != digest:
-        raise IdentityCollisionError(
-            short_id=short_id,
-            existing_digest=existing_digest,
-            new_digest=digest,
-        )
 
     return short_id, digest
 
@@ -373,7 +527,6 @@ def generate_evidence_id(
     canonical_rule_parameters: str,
     normalized_claim_key: str,
     id_algo_version: str = IDENTITY_ALGO_VERSION,
-    existing_digest: str | None = None,
 ) -> tuple[str, str]:
     """Generate a stable hybrid evidence_id and full SHA-256 identity_digest.
 
@@ -385,6 +538,15 @@ def generate_evidence_id(
 
     Short ID format: ev-{evidence_type_abbrev}-{first_12_hex_of_digest}
 
+    All inputs are validated before hashing:
+      - source_id must match src-[a-z0-9_]{1,12}-[0-9a-f]{12}.
+      - evidence_type_key must match ^[a-z][a-z0-9_]{0,63}$.
+      - normalized_claim_key must match ^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$
+        and must not exceed 128 characters.
+      - id_algo_version must match ^[a-z0-9][a-z0-9._-]{0,31}$.
+      - canonical_source_locator and canonical_rule_parameters must be
+        valid canonical JSON strings.
+
     Args:
         source_id:                  source_id of the originating source.
         evidence_type_key:          Validated evidence_type string (rule key).
@@ -392,9 +554,6 @@ def generate_evidence_id(
         canonical_rule_parameters:  Output of canonicalize_rule_parameters().
         normalized_claim_key:       Stable dot-separated claim key string.
         id_algo_version:            Identity algorithm version tag.  Default "v1".
-        existing_digest:            If the caller has previously stored a digest
-                                    for this short_id, pass it here to trigger
-                                    IdentityCollisionError if it differs.
 
     Returns:
         (evidence_id, identity_digest) where:
@@ -402,9 +561,107 @@ def generate_evidence_id(
           - identity_digest is the full 64-char lowercase SHA-256 hex string
 
     Raises:
-        IdentityCollisionError: If existing_digest differs from the newly
-                                computed digest.
+        ValueError: If any input fails validation.
     """
+    # --- Validate inputs ---
+
+    # source_id format.
+    if not _SOURCE_ID_RE.match(source_id):
+        raise ValueError(
+            f"source_id must match src-[a-z0-9_]{{1,12}}-[0-9a-f]{{12}}, "
+            f"got: {source_id!r}"
+        )
+
+    # evidence_type_key syntax.
+    if not _EVIDENCE_TYPE_RE.match(evidence_type_key):
+        raise ValueError(
+            f"evidence_type_key must match ^[a-z][a-z0-9_]{{0,63}}$, "
+            f"got: {evidence_type_key!r}"
+        )
+
+    # normalized_claim_key syntax.
+    if len(normalized_claim_key) > _CLAIM_KEY_MAX_LEN:
+        raise ValueError(
+            f"normalized_claim_key must not exceed {_CLAIM_KEY_MAX_LEN} characters, "
+            f"got {len(normalized_claim_key)}"
+        )
+    if not _CLAIM_KEY_RE.match(normalized_claim_key):
+        raise ValueError(
+            f"normalized_claim_key must match "
+            f"^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$, got: {normalized_claim_key!r}"
+        )
+
+    # id_algo_version syntax.
+    if not _ID_ALGO_VERSION_RE.match(id_algo_version):
+        raise ValueError(
+            f"id_algo_version must match ^[a-z0-9][a-z0-9._-]{{0,31}}$, "
+            f"got: {id_algo_version!r}"
+        )
+
+    # canonical_source_locator: must be a str, parse to a valid SourceLocator,
+    # re-canonicalize, and require exact match.
+    if not isinstance(canonical_source_locator, str):
+        raise ValueError(
+            f"canonical_source_locator must be a str, "
+            f"got {type(canonical_source_locator).__name__!r}"
+        )
+    try:
+        _parsed_locator = json.loads(canonical_source_locator)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"canonical_source_locator must be valid JSON; "
+            f"got: {canonical_source_locator!r} — {exc}"
+        ) from exc
+    # Validate the parsed object through the SourceLocator schema and re-canonicalize.
+    try:
+        _recanon_locator = canonicalize_locator(_parsed_locator)
+    except Exception as exc:
+        raise ValueError(
+            f"canonical_source_locator does not represent a valid SourceLocator; "
+            f"got: {canonical_source_locator!r} — {exc}"
+        ) from exc
+    if canonical_source_locator != _recanon_locator:
+        raise ValueError(
+            f"canonical_source_locator is not in canonical form.  "
+            f"Expected: {_recanon_locator!r}  Got: {canonical_source_locator!r}.  "
+            "Pass the output of canonicalize_locator() directly."
+        )
+
+    # canonical_rule_parameters: must be a str, parse to a JSON object, recursively
+    # validate values, re-canonicalize, and require exact match.
+    if not isinstance(canonical_rule_parameters, str):
+        raise ValueError(
+            f"canonical_rule_parameters must be a str, "
+            f"got {type(canonical_rule_parameters).__name__!r}"
+        )
+    try:
+        _parsed_params = json.loads(canonical_rule_parameters)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"canonical_rule_parameters must be valid JSON; "
+            f"got: {canonical_rule_parameters!r} — {exc}"
+        ) from exc
+    if not isinstance(_parsed_params, dict):
+        raise ValueError(
+            f"canonical_rule_parameters must be a JSON object (dict), "
+            f"got {type(_parsed_params).__name__!r}: {canonical_rule_parameters!r}"
+        )
+    # Recursively validate JSON-compatibility and re-canonicalize.
+    try:
+        _recanon_params = canonicalize_rule_parameters(_parsed_params)
+    except Exception as exc:
+        raise ValueError(
+            f"canonical_rule_parameters contains invalid values; "
+            f"got: {canonical_rule_parameters!r} — {exc}"
+        ) from exc
+    if canonical_rule_parameters != _recanon_params:
+        raise ValueError(
+            f"canonical_rule_parameters is not in canonical form.  "
+            f"Expected: {_recanon_params!r}  Got: {canonical_rule_parameters!r}.  "
+            "Pass the output of canonicalize_rule_parameters() directly."
+        )
+
+    # --- Build short ID ---
     type_abbrev = _evidence_type_abbrev(evidence_type_key)
 
     identity_input = _SEP.join([
@@ -418,12 +675,5 @@ def generate_evidence_id(
 
     digest = _sha256_hex(identity_input)
     short_id = f"ev-{type_abbrev}-{digest[:_SHORT_HEX_LEN]}"
-
-    if existing_digest is not None and existing_digest != digest:
-        raise IdentityCollisionError(
-            short_id=short_id,
-            existing_digest=existing_digest,
-            new_digest=digest,
-        )
 
     return short_id, digest

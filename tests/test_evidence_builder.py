@@ -27,8 +27,11 @@ import pytest
 from app.data_health import analyze_data_health
 from app.data_parser import parse_csv
 from app.evidence_builder import (
+    ConflictingSourceManifestError,
     EvidenceScopeError,
     MissingSourceManifestError,
+    ProvenanceMismatchError,
+    _build_manifest_registry,
     _derive_evidence_scope,
     build_evidence,
 )
@@ -635,3 +638,239 @@ class TestSeparateSourcesRemainTraceable:
         assert ev1[0].source_id != ev2[0].source_id
         assert ev1[0].source_id == entry1.source_id
         assert ev2[0].source_id == entry2.source_id
+
+
+# ===========================================================================
+# L. Provenance: candidate ↔ manifest source_format enforcement
+# ===========================================================================
+
+
+class TestProvenanceMismatch:
+    """Tests for ProvenanceMismatchError — Fix 4."""
+
+    def test_csv_manifest_with_pasted_text_candidate_raises(self):
+        """A CSV manifest + pasted_text candidate must raise ProvenanceMismatchError."""
+        from app.identity import generate_source_id
+        from app.schemas import TextSourceLocator
+
+        # Build a CSV manifest.
+        csv_entry = _csv_entry(b"a,b\n1,2\n")
+
+        # Build a pasted_text candidate referencing the same source_id.
+        pasted_text_candidate = HealthFindingCandidate(
+            source_id=csv_entry.source_id,
+            source_format=SourceFormat.pasted_text,   # MISMATCH
+            source_locator=TextSourceLocator(line_start=0),
+            evidence_type="missing_value_rate",
+            canonical_rule_parameters={"threshold": 0.1},
+            normalized_claim_key="data.missing.revenue",
+            finding="Finding text.",
+            supporting_evidence="Evidence text.",
+            confidence="high",
+            relevant_roles=["data_analyst"],
+            decision_relevance="Decision relevance text.",
+        )
+
+        with pytest.raises(ProvenanceMismatchError) as exc_info:
+            build_evidence([pasted_text_candidate], [csv_entry])
+        err = exc_info.value
+        assert err.source_id == csv_entry.source_id
+        assert err.manifest_source_format == "csv"
+        assert err.candidate_source_format == "pasted_text"
+
+    def test_matching_format_succeeds(self):
+        """A candidate whose source_format matches the manifest is accepted."""
+        entry = _csv_entry(b"a,b\n1,2\n1,2\n")
+        candidate = _make_single_candidate(entry)
+        # candidate.source_format == SourceFormat.csv == entry.source_format
+        evidence = build_evidence([candidate], [entry])
+        assert len(evidence) == 1
+
+    def test_provenance_error_is_value_error(self):
+        assert issubclass(ProvenanceMismatchError, ValueError)
+
+    def test_provenance_error_attributes(self):
+        err = ProvenanceMismatchError(
+            source_id="src-csv-aabbccddee00",
+            manifest_source_format="csv",
+            candidate_source_format="pasted_text",
+        )
+        assert err.source_id == "src-csv-aabbccddee00"
+        assert err.manifest_source_format == "csv"
+        assert err.candidate_source_format == "pasted_text"
+
+
+# ===========================================================================
+# M. Duplicate manifests: explicit registry builder
+# ===========================================================================
+
+
+class TestDuplicateManifests:
+    """Tests for _build_manifest_registry — Fix 5."""
+
+    def _make_manifest(self, content: str, format_val: SourceFormat = SourceFormat.csv) -> SourceManifestEntry:
+        """Make a SourceManifestEntry for testing manifest registry behavior."""
+        from app.identity import generate_source_id
+        sid, digest = generate_source_id(
+            source_format=format_val.value,
+            semantic_context_category="data_source",
+            normalized_content=content,
+        )
+        return SourceManifestEntry(
+            source_id=sid,
+            identity_digest=digest,
+            source_format=format_val,
+            semantic_context_category=SemanticContextCategory.data_source,
+            source_scope=SourceScope.internal_observation,
+            id_algo_version="v1",
+            created_at=_FIXED_DT,
+        )
+
+    def test_same_source_id_different_digest_raises_identity_collision(self):
+        """Same source_id but different identity_digest → IdentityCollisionError."""
+        m1 = self._make_manifest("content_a")
+        # Force m2 to have same source_id as m1 but a different digest.
+        from app.identity import generate_source_id
+        sid_m1, digest_m1 = m1.source_id, m1.identity_digest
+        # Build m2 with different content but same source_id via direct construction.
+        _, digest_other = generate_source_id(
+            source_format="csv",
+            semantic_context_category="data_source",
+            normalized_content="content_b",
+        )
+        m2 = SourceManifestEntry(
+            source_id=sid_m1,        # same short ID
+            identity_digest=digest_other,  # different digest
+            source_format=SourceFormat.csv,
+            semantic_context_category=SemanticContextCategory.data_source,
+            source_scope=SourceScope.internal_observation,
+            id_algo_version="v1",
+            created_at=_FIXED_DT,
+        )
+
+        with pytest.raises(IdentityCollisionError):
+            _build_manifest_registry([m1, m2])
+
+    def test_same_source_id_same_digest_conflicting_identity_metadata_raises(self):
+        """Same source_id + same digest but different source_format → ConflictingSourceManifestError."""
+        m1 = self._make_manifest("shared content", SourceFormat.csv)
+        # Manually build a second manifest: same source_id and digest, different source_format.
+        # In practice this would not arise from generate_source_id (format is an identity input),
+        # but the builder must protect against it regardless.
+        m2 = SourceManifestEntry(
+            source_id=m1.source_id,
+            identity_digest=m1.identity_digest,
+            source_format=SourceFormat.excel,  # CONFLICTS with m1
+            semantic_context_category=m1.semantic_context_category,
+            source_scope=m1.source_scope,
+            id_algo_version=m1.id_algo_version,
+            created_at=_FIXED_DT,
+        )
+
+        with pytest.raises(ConflictingSourceManifestError) as exc_info:
+            _build_manifest_registry([m1, m2])
+        assert exc_info.value.source_id == m1.source_id
+
+    def test_same_source_identity_different_upload_metadata_accepted(self):
+        """Same source_id + same digest + same identity metadata, different upload metadata:
+        treated as the same source identity, no error.
+        """
+        m1 = self._make_manifest("content")
+        # m2 has the same identity but different filename/upload_event_id/created_at.
+        m2 = SourceManifestEntry(
+            source_id=m1.source_id,
+            identity_digest=m1.identity_digest,
+            source_format=m1.source_format,
+            semantic_context_category=m1.semantic_context_category,
+            source_scope=m1.source_scope,
+            id_algo_version=m1.id_algo_version,
+            filename="second_upload.csv",        # different upload metadata
+            upload_event_id="evt-second",
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        )
+        # Must not raise.
+        registry = _build_manifest_registry([m1, m2])
+        assert registry[m1.source_id] is m1  # first entry kept
+
+    def test_distinct_sources_coexist(self):
+        """Manifests with different source_ids are independent entries."""
+        m1 = self._make_manifest("content_a")
+        m2 = self._make_manifest("content_b")
+        assert m1.source_id != m2.source_id
+        registry = _build_manifest_registry([m1, m2])
+        assert len(registry) == 2
+
+
+# ===========================================================================
+# N. Evidence version comes from manifest id_algo_version
+# ===========================================================================
+
+
+class TestEvidenceVersionFromManifest:
+    """Tests that evidence_id generation uses manifest.id_algo_version — Fix 4."""
+
+    def test_evidence_id_version_matches_manifest(self):
+        """The id_algo_version on the resulting EvidenceObject matches the manifest."""
+        entry = _csv_entry(b"a,b\n1,2\n1,2\n")
+        candidate = _make_single_candidate(entry)
+        evidence = build_evidence([candidate], [entry])
+        assert len(evidence) == 1
+        assert evidence[0].id_algo_version == entry.id_algo_version
+
+    def test_different_manifest_version_produces_different_evidence_id(self):
+        """When the manifest uses a different id_algo_version, the evidence_id changes."""
+        from app.identity import generate_source_id
+
+        # Build two manifests with the same content but different id_algo_version.
+        sid_v1, digest_v1 = generate_source_id(
+            source_format="csv",
+            semantic_context_category="data_source",
+            normalized_content="a,b\n1,2\n",
+        )
+        sid_v2, digest_v2 = generate_source_id(
+            source_format="csv",
+            semantic_context_category="data_source",
+            normalized_content="a,b,v2\n1,2,x\n",
+        )
+
+        manifest_v1 = SourceManifestEntry(
+            source_id=sid_v1,
+            identity_digest=digest_v1,
+            source_format=SourceFormat.csv,
+            semantic_context_category=SemanticContextCategory.data_source,
+            source_scope=SourceScope.internal_observation,
+            id_algo_version="v1",
+            created_at=_FIXED_DT,
+        )
+        manifest_v2 = SourceManifestEntry(
+            source_id=sid_v2,
+            identity_digest=digest_v2,
+            source_format=SourceFormat.csv,
+            semantic_context_category=SemanticContextCategory.data_source,
+            source_scope=SourceScope.internal_observation,
+            id_algo_version="v1b",
+            created_at=_FIXED_DT,
+        )
+
+        def _make_cand(manifest: SourceManifestEntry) -> HealthFindingCandidate:
+            return HealthFindingCandidate(
+                source_id=manifest.source_id,
+                source_format=SourceFormat.csv,
+                source_locator=TabularSourceLocator(columns=["a"]),
+                evidence_type="missing_value_rate",
+                canonical_rule_parameters={"threshold": 0.1},
+                normalized_claim_key="data.missing.a",
+                finding="Some finding.",
+                supporting_evidence="Some evidence.",
+                confidence="high",
+                relevant_roles=["data_analyst"],
+                decision_relevance="Relevant.",
+            )
+
+        ev1 = build_evidence([_make_cand(manifest_v1)], [manifest_v1])
+        ev2 = build_evidence([_make_cand(manifest_v2)], [manifest_v2])
+
+        assert ev1[0].id_algo_version == "v1"
+        assert ev2[0].id_algo_version == "v1b"
+        # Different manifests with different source_ids → different evidence_ids.
+        assert ev1[0].evidence_id != ev2[0].evidence_id

@@ -276,26 +276,93 @@ class TestParsePastedText:
         r2 = parse_pasted_text(without_bom, semantic_context_category=SemanticContextCategory.industry_context, created_at=_FIXED_DT)
         assert r1.source_id == r2.source_id
 
-    # --- Collision detection ---
+    # --- Collision detection via identity_registry ---
 
-    def test_existing_digest_match_no_error(self):
-        r1 = parse_pasted_text(_SAMPLE_TEXT, semantic_context_category=SemanticContextCategory.industry_context, created_at=_FIXED_DT)
+    def test_no_registry_no_collision_check(self):
+        """identity_registry=None (default): no collision check, always succeeds."""
+        r = parse_pasted_text(
+            _SAMPLE_TEXT,
+            semantic_context_category=SemanticContextCategory.industry_context,
+            created_at=_FIXED_DT,
+        )
+        assert isinstance(r, SourceManifestEntry)
+
+    def test_no_bare_existing_digest_parameter(self):
+        """parse_pasted_text must NOT accept a bare existing_digest argument."""
+        with pytest.raises(TypeError):
+            parse_pasted_text(  # type: ignore[call-arg]
+                _SAMPLE_TEXT,
+                semantic_context_category=SemanticContextCategory.industry_context,
+                created_at=_FIXED_DT,
+                existing_digest="a" * 64,
+            )
+
+    def test_same_id_same_digest_accepted(self):
+        """Same source_id + same digest in the registry: accepted (same identity)."""
+        r1 = parse_pasted_text(
+            _SAMPLE_TEXT,
+            semantic_context_category=SemanticContextCategory.industry_context,
+            created_at=_FIXED_DT,
+        )
         r2 = parse_pasted_text(
             _SAMPLE_TEXT,
             semantic_context_category=SemanticContextCategory.industry_context,
             created_at=_FIXED_DT,
-            existing_digest=r1.identity_digest,
+            identity_registry={r1.source_id: r1.identity_digest},
         )
         assert r1.source_id == r2.source_id
+        assert r1.identity_digest == r2.identity_digest
 
-    def test_existing_digest_mismatch_raises_collision_error(self):
+    def test_same_id_different_digest_raises_collision_error(self):
+        """Same source_id but different digest in the registry: IdentityCollisionError."""
+        r1 = parse_pasted_text(
+            _SAMPLE_TEXT,
+            semantic_context_category=SemanticContextCategory.industry_context,
+            created_at=_FIXED_DT,
+        )
         with pytest.raises(IdentityCollisionError):
             parse_pasted_text(
                 _SAMPLE_TEXT,
                 semantic_context_category=SemanticContextCategory.industry_context,
                 created_at=_FIXED_DT,
-                existing_digest="f" * 64,
+                identity_registry={r1.source_id: "f" * 64},
             )
+
+    def test_unrelated_registry_entry_no_collision(self):
+        """A registry entry for a different source_id must not raise.
+
+        An unrelated digest in the registry under a different short_id
+        must never be treated as a collision.
+        """
+        text_a = "Content A — industry context."
+        text_b = "Content B — industry context."
+        r_a = parse_pasted_text(text_a, semantic_context_category=SemanticContextCategory.industry_context, created_at=_FIXED_DT)
+        r_b = parse_pasted_text(text_b, semantic_context_category=SemanticContextCategory.industry_context, created_at=_FIXED_DT)
+        assert r_a.source_id != r_b.source_id
+        # Ingesting text_b with only r_a in the registry must NOT raise.
+        r_b2 = parse_pasted_text(
+            text_b,
+            semantic_context_category=SemanticContextCategory.industry_context,
+            created_at=_FIXED_DT,
+            identity_registry={r_a.source_id: r_a.identity_digest},
+        )
+        assert r_b2.source_id == r_b.source_id
+
+    def test_identity_registry_not_mutated(self):
+        """The supplied identity_registry must not be modified."""
+        r1 = parse_pasted_text(
+            _SAMPLE_TEXT,
+            semantic_context_category=SemanticContextCategory.industry_context,
+            created_at=_FIXED_DT,
+        )
+        registry: dict[str, str] = {}
+        parse_pasted_text(
+            _SAMPLE_TEXT,
+            semantic_context_category=SemanticContextCategory.industry_context,
+            created_at=_FIXED_DT,
+            identity_registry=registry,
+        )
+        assert registry == {}, "identity_registry must not be mutated by parse_pasted_text"
 
     # --- Algo version ---
 

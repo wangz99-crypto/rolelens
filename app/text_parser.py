@@ -32,7 +32,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from app.identity import generate_source_id, normalize_source_content
+from typing import Mapping
+
+from app.identity import check_identity_collision, generate_source_id, normalize_source_content
 from app.schemas import (
     SemanticContextCategory,
     SourceFormat,
@@ -63,7 +65,7 @@ def parse_pasted_text(
     source_format: SourceFormat = SourceFormat.pasted_text,
     id_algo_version: str = "v1",
     created_at: datetime | None = None,
-    existing_digest: str | None = None,
+    identity_registry: Mapping[str, str] | None = None,
 ) -> SourceManifestEntry:
     """Accept pasted text and produce a SourceManifestEntry.
 
@@ -80,8 +82,12 @@ def parse_pasted_text(
         id_algo_version:           Identity algorithm version.  Default "v1".
         created_at:                Timezone-aware datetime for the manifest entry.
                                    Defaults to utc_now() if not provided.
-        existing_digest:           If provided, passed to generate_source_id()
-                                   for collision detection.
+        identity_registry:         Optional mapping of short_id → identity_digest
+                                   used for collision detection.  When provided,
+                                   check_identity_collision() is called with the
+                                   generated (source_id, identity_digest) pair.
+                                   An unrelated entry with a different short ID
+                                   does not raise.  The registry is not mutated.
 
     Returns:
         SourceManifestEntry with a stable source_id and identity_digest.
@@ -89,8 +95,8 @@ def parse_pasted_text(
     Raises:
         ValueError: If source_format is not a text intake format.
         ValueError: If raw_text cannot be decoded as UTF-8 (bytes input only).
-        IdentityCollisionError: If existing_digest differs from the computed
-                                digest (propagated from identity.py).
+        IdentityCollisionError: If identity_registry contains this source_id
+                                under a different digest.
         ValidationError: If SourceManifestEntry construction fails.
     """
     if source_format not in _TEXT_INTAKE_FORMATS:
@@ -107,8 +113,14 @@ def parse_pasted_text(
         semantic_context_category=semantic_context_category.value,
         normalized_content=normalized,
         id_algo_version=id_algo_version,
-        existing_digest=existing_digest,
     )
+
+    if identity_registry is not None:
+        check_identity_collision(
+            short_id=source_id,
+            identity_digest=identity_digest,
+            existing_identities=identity_registry,
+        )
 
     # Resolve source_scope: locked categories use the locked mapping; others
     # must be resolved by the caller's category choice.

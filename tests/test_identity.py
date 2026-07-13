@@ -42,6 +42,7 @@ from app.identity import (
     _sha256_hex,
     canonicalize_locator,
     canonicalize_rule_parameters,
+    check_identity_collision,
     generate_evidence_id,
     generate_source_id,
     normalize_source_content,
@@ -163,9 +164,11 @@ class TestFormatAbbrev:
     def test_form_input(self):
         assert _format_abbrev("form_input") == "form"
 
-    def test_pdf_text(self):
-        # pdf_text is registered even though it is a delayed optional format.
-        assert _format_abbrev("pdf_text") == "pdf"
+    def test_pdf_text_raises_value_error(self):
+        # pdf_text is not an active SourceFormat in V1; it must not have a
+        # registered abbreviation and must raise ValueError when passed.
+        with pytest.raises(ValueError, match="No stable abbreviation"):
+            _format_abbrev("pdf_text")
 
     def test_unknown_format_raises_value_error(self):
         with pytest.raises(ValueError, match="No stable abbreviation"):
@@ -204,16 +207,11 @@ class TestEvidenceTypeAbbrev:
         assert len(result) == 12
         assert result == "missing_valu"
 
-    def test_lowercase_applied(self):
-        # evidence_type_key is already lowercase per schema validation,
-        # but the function must handle the case defensively.
-        result = _evidence_type_abbrev("MISSING")
-        assert result == "missing"
-
-    def test_non_alphanumeric_replaced_with_underscore(self):
-        # Belt-and-suspenders: should not occur with validated keys.
-        result = _evidence_type_abbrev("abc-def")
-        assert result == "abc_def"
+    def test_truncation_only_no_sanitization(self):
+        # _evidence_type_abbrev only truncates — it does NOT lowercase or
+        # replace characters.  Callers must pass already-validated keys.
+        result = _evidence_type_abbrev("abc_def_xyz_more")
+        assert result == "abc_def_xyz_"
 
     def test_result_matches_evidence_id_abbrev_regex(self):
         abbrev_re = re.compile(r"^[a-z0-9_]{1,12}$")
@@ -277,11 +275,35 @@ class TestCanonicalizeLocator:
         assert parsed["locator_type"] == "user_context"
         assert parsed["field_name"] == "strategy_goal"
 
-    def test_plain_dict_accepted(self):
+    def test_valid_dict_validated_through_schema(self):
+        # A valid SourceLocator dict is validated through TypeAdapter(SourceLocator)
+        # before canonicalization.
         d = {"locator_type": "tabular", "columns": ["x"], "row_range": None}
         result = canonicalize_locator(d)
         parsed = json.loads(result)
         assert parsed["columns"] == ["x"]
+
+    def test_arbitrary_dict_rejected(self):
+        """An arbitrary dict that does not conform to any SourceLocator type is rejected."""
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            canonicalize_locator({"not": "a_locator", "random_key": 42})
+
+    def test_dict_with_invalid_locator_type_rejected(self):
+        """A dict with an unrecognized locator_type discriminator is rejected."""
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            canonicalize_locator({"locator_type": "unknown_type", "columns": ["x"]})
+
+    def test_arbitrary_pydantic_model_rejected(self):
+        """An arbitrary Pydantic BaseModel that is not a SourceLocator is rejected."""
+        from pydantic import BaseModel, ValidationError
+
+        class _ArbitraryModel(BaseModel):
+            x: int = 1
+
+        with pytest.raises(ValidationError):
+            canonicalize_locator(_ArbitraryModel())
 
     def test_unsupported_type_raises_type_error(self):
         with pytest.raises(TypeError, match="Pydantic model or dict"):
@@ -386,6 +408,62 @@ class TestCanonicalizeRuleParameters:
         result = canonicalize_rule_parameters({"threshold": 3.0})
         parsed = json.loads(result)
         assert isinstance(parsed, dict)
+
+    # --- Recursive type rejection ---
+
+    def test_nested_integer_key_rejected(self):
+        """A nested dict with a non-string key must be rejected."""
+        with pytest.raises(ValueError):
+            canonicalize_rule_parameters({"nested": {1: "x"}})
+
+    def test_nested_tuple_rejected(self):
+        """A tuple nested inside a list must be rejected."""
+        with pytest.raises(ValueError):
+            canonicalize_rule_parameters({"nested": (1, 2)})
+
+    def test_nested_set_rejected(self):
+        """A set nested inside a list must be rejected."""
+        with pytest.raises(ValueError):
+            canonicalize_rule_parameters({"items": {1, 2, 3}})
+
+    def test_nested_bytes_rejected(self):
+        """bytes nested in a list must be rejected."""
+        with pytest.raises(ValueError):
+            canonicalize_rule_parameters({"data": [b"binary"]})
+
+    def test_deeply_nested_unsupported_value_rejected(self):
+        """An unsupported type three levels deep must be rejected."""
+        with pytest.raises(ValueError):
+            canonicalize_rule_parameters({"a": {"b": {"c": (1, 2)}}})
+
+    def test_deeply_nested_non_string_key_rejected(self):
+        """A non-string key two levels deep must be rejected."""
+        with pytest.raises(ValueError):
+            canonicalize_rule_parameters({"outer": {42: "v"}})
+
+    def test_deeply_nested_nan_rejected(self):
+        """NaN three levels deep must be rejected."""
+        import math
+        with pytest.raises(ValueError):
+            canonicalize_rule_parameters({"a": {"b": float("nan")}})
+
+    def test_valid_nested_json_accepted(self):
+        """A deeply nested but fully valid JSON structure is accepted."""
+        params = {
+            "config": {
+                "threshold": 0.05,
+                "labels": ["low", "high"],
+                "nested": {"active": True, "count": 42, "note": None},
+            }
+        }
+        result = canonicalize_rule_parameters(params)
+        parsed = json.loads(result)
+        assert parsed["config"]["nested"]["count"] == 42
+
+    def test_non_dict_input_rejected(self):
+        """canonicalize_rule_parameters requires a dict at the top level."""
+        with pytest.raises(ValueError):
+            canonicalize_rule_parameters([1, 2, 3])  # type: ignore[arg-type]
 
 
 # ===========================================================================
@@ -623,58 +701,63 @@ class TestGenerateSourceId:
         )
         assert s1 == s2
 
-    # --- Collision detection ---
-
-    def test_existing_digest_match_no_error(self):
-        sid, digest = generate_source_id(
-            source_format="csv",
-            semantic_context_category="data_source",
-            normalized_content="content",
-        )
-        # Re-generating with the same inputs and matching existing_digest → no error.
-        sid2, digest2 = generate_source_id(
-            source_format="csv",
-            semantic_context_category="data_source",
-            normalized_content="content",
-            existing_digest=digest,
-        )
-        assert sid == sid2
-        assert digest == digest2
-
-    def test_existing_digest_mismatch_raises_collision_error(self):
-        _, digest = generate_source_id(
-            source_format="csv",
-            semantic_context_category="data_source",
-            normalized_content="content_a",
-        )
-        fake_wrong_digest = "a" * 64  # guaranteed to be different unless astronomically lucky
-        with pytest.raises(IdentityCollisionError):
-            generate_source_id(
-                source_format="csv",
-                semantic_context_category="data_source",
-                normalized_content="content_a",
-                existing_digest=fake_wrong_digest,
-            )
-
-    def test_none_existing_digest_skips_collision_check(self):
-        # existing_digest=None must not raise.
-        sid, digest = generate_source_id(
-            source_format="csv",
-            semantic_context_category="data_source",
-            normalized_content="content",
-            existing_digest=None,
-        )
-        assert _SOURCE_ID_RE.match(sid)
-
-    # --- Unknown format ---
+    # --- Input validation ---
 
     def test_unknown_format_raises_value_error(self):
-        with pytest.raises(ValueError, match="No stable abbreviation"):
+        # "unsupported_format" is not a valid SourceFormat value.
+        with pytest.raises(ValueError):
             generate_source_id(
                 source_format="unsupported_format",
                 semantic_context_category="data_source",
                 normalized_content="content",
             )
+
+    def test_invalid_semantic_category_rejected(self):
+        # "not_real" is not a valid SemanticContextCategory.
+        with pytest.raises(ValueError):
+            generate_source_id(
+                source_format="csv",
+                semantic_context_category="not_real",
+                normalized_content="content",
+            )
+
+    def test_padded_algo_version_rejected(self):
+        with pytest.raises(ValueError, match="id_algo_version"):
+            generate_source_id(
+                source_format="csv",
+                semantic_context_category="data_source",
+                normalized_content="content",
+                id_algo_version=" v1 ",
+            )
+
+    def test_pdf_text_source_format_rejected_by_generate_source_id(self):
+        # pdf_text is not an active SourceFormat in V1.
+        with pytest.raises(ValueError):
+            generate_source_id(
+                source_format="pdf_text",
+                semantic_context_category="data_source",
+                normalized_content="content",
+            )
+
+    def test_different_content_produces_different_ids_not_collision(self):
+        # Two different content strings produce different source IDs.
+        # This is not a collision — they are just different sources.
+        sid_a, digest_a = generate_source_id(
+            source_format="csv",
+            semantic_context_category="data_source",
+            normalized_content="content_a",
+        )
+        sid_b, digest_b = generate_source_id(
+            source_format="csv",
+            semantic_context_category="data_source",
+            normalized_content="content_b",
+        )
+        assert sid_a != sid_b
+        assert digest_a != digest_b
+        # They have different short IDs — checking one's digest against the
+        # other's registry entry does NOT constitute a collision.
+        check_identity_collision(sid_a, digest_a, {sid_b: digest_b})  # no error
+        check_identity_collision(sid_b, digest_b, {sid_a: digest_a})  # no error
 
     # --- Digest is not source_id ---
 
@@ -879,9 +962,54 @@ class TestGenerateEvidenceId:
         eid2, _ = generate_evidence_id(**kwargs, id_algo_version="v2")
         assert eid1 != eid2
 
-    # --- Collision detection ---
+    # --- Input validation ---
 
-    def test_existing_digest_match_no_error(self):
+    def test_invalid_source_id_rejected(self):
+        # "not-valid" does not match src-[a-z0-9_]{1,12}-[0-9a-f]{12}.
+        with pytest.raises(ValueError):
+            generate_evidence_id(
+                source_id="not-valid",
+                evidence_type_key="missing_value_rate",
+                canonical_source_locator=self._base_locator_str(),
+                canonical_rule_parameters=self._base_params_str(),
+                normalized_claim_key="data.missing.revenue",
+            )
+
+    def test_invalid_evidence_type_key_rejected(self):
+        # Uppercase is not allowed in evidence_type_key.
+        with pytest.raises(ValueError):
+            generate_evidence_id(
+                source_id="src-csv-abcdef012345",
+                evidence_type_key="MISSING_VALUE",
+                canonical_source_locator=self._base_locator_str(),
+                canonical_rule_parameters=self._base_params_str(),
+                normalized_claim_key="data.missing.revenue",
+            )
+
+    def test_invalid_normalized_claim_key_rejected(self):
+        # Uppercase is not allowed in normalized_claim_key.
+        with pytest.raises(ValueError):
+            generate_evidence_id(
+                source_id="src-csv-abcdef012345",
+                evidence_type_key="missing_value_rate",
+                canonical_source_locator=self._base_locator_str(),
+                canonical_rule_parameters=self._base_params_str(),
+                normalized_claim_key="Data.Missing",
+            )
+
+    def test_padded_algo_version_rejected(self):
+        with pytest.raises(ValueError, match="id_algo_version"):
+            generate_evidence_id(
+                source_id="src-csv-abcdef012345",
+                evidence_type_key="missing_value_rate",
+                canonical_source_locator=self._base_locator_str(),
+                canonical_rule_parameters=self._base_params_str(),
+                normalized_claim_key="data.missing.revenue",
+                id_algo_version=" v1 ",
+            )
+
+    def test_pure_function_idempotent(self):
+        # generate_evidence_id is a pure function: same inputs → same outputs.
         eid, digest = generate_evidence_id(
             source_id="src-csv-abcdef012345",
             evidence_type_key="missing_value_rate",
@@ -895,32 +1023,96 @@ class TestGenerateEvidenceId:
             canonical_source_locator=self._base_locator_str(),
             canonical_rule_parameters=self._base_params_str(),
             normalized_claim_key="data.missing.revenue",
-            existing_digest=digest,
         )
         assert eid == eid2
         assert digest == digest2
 
-    def test_existing_digest_mismatch_raises_collision_error(self):
-        with pytest.raises(IdentityCollisionError):
+    # --- Canonical-JSON enforcement ---
+
+    def test_unsorted_locator_json_rejected(self):
+        """Locator JSON with unsorted keys must be rejected even if parseable."""
+        # canonical form has keys sorted; manually building unsorted JSON fails.
+        unsorted = '{"locator_type":"tabular","row_range":null,"columns":["revenue"],"sheet_name":null,"cell_range":null,"metric":null,"aggregation":null}'
+        # Verify it actually parses but is unsorted vs canonical.
+        canonical = self._base_locator_str()
+        assert json.loads(unsorted) == json.loads(canonical)  # same data
+        assert unsorted != canonical                           # different bytes
+        with pytest.raises(ValueError, match="canonical form"):
+            generate_evidence_id(
+                source_id="src-csv-abcdef012345",
+                evidence_type_key="missing_value_rate",
+                canonical_source_locator=unsorted,
+                canonical_rule_parameters=self._base_params_str(),
+                normalized_claim_key="data.missing.revenue",
+            )
+
+    def test_non_canonical_params_json_rejected(self):
+        """Params JSON with extra whitespace must be rejected."""
+        non_canonical = '{ "threshold" : 0.05 }'
+        canonical = self._base_params_str()
+        assert json.loads(non_canonical) == json.loads(canonical)
+        assert non_canonical != canonical
+        with pytest.raises(ValueError, match="canonical form"):
             generate_evidence_id(
                 source_id="src-csv-abcdef012345",
                 evidence_type_key="missing_value_rate",
                 canonical_source_locator=self._base_locator_str(),
-                canonical_rule_parameters=self._base_params_str(),
+                canonical_rule_parameters=non_canonical,
                 normalized_claim_key="data.missing.revenue",
-                existing_digest="b" * 64,
             )
 
-    def test_none_existing_digest_no_error(self):
-        eid, _ = generate_evidence_id(
+    def test_json_string_as_locator_rejected(self):
+        """A bare JSON string (not a locator object) must be rejected."""
+        with pytest.raises(ValueError):
+            generate_evidence_id(
+                source_id="src-csv-abcdef012345",
+                evidence_type_key="missing_value_rate",
+                canonical_source_locator='"just a string"',
+                canonical_rule_parameters=self._base_params_str(),
+                normalized_claim_key="data.missing.revenue",
+            )
+
+    def test_json_list_as_rule_parameters_rejected(self):
+        """A JSON array where a JSON object is required must be rejected."""
+        with pytest.raises(ValueError, match="JSON object"):
+            generate_evidence_id(
+                source_id="src-csv-abcdef012345",
+                evidence_type_key="missing_value_rate",
+                canonical_source_locator=self._base_locator_str(),
+                canonical_rule_parameters='[1,2,3]',
+                normalized_claim_key="data.missing.revenue",
+            )
+
+    def test_output_of_canonicalize_functions_is_accepted(self):
+        """Output directly from canonicalize_locator() and canonicalize_rule_parameters()
+        must be accepted by generate_evidence_id without error."""
+        loc = canonicalize_locator(TabularSourceLocator(columns=["revenue"]))
+        params = canonicalize_rule_parameters({"threshold": 0.05})
+        eid, digest = generate_evidence_id(
             source_id="src-csv-abcdef012345",
             evidence_type_key="missing_value_rate",
-            canonical_source_locator=self._base_locator_str(),
-            canonical_rule_parameters=self._base_params_str(),
+            canonical_source_locator=loc,
+            canonical_rule_parameters=params,
             normalized_claim_key="data.missing.revenue",
-            existing_digest=None,
         )
         assert _EVIDENCE_ID_RE.match(eid)
+        assert _DIGEST_RE.match(digest)
+
+    def test_unsorted_params_json_rejected(self):
+        """Params JSON with unsorted keys must be rejected."""
+        unsorted_params = '{"z_key":1,"a_key":2}'
+        canonical_params = canonicalize_rule_parameters({"z_key": 1, "a_key": 2})
+        # Canonical form sorts keys: a_key < z_key.
+        assert json.loads(unsorted_params) == json.loads(canonical_params)
+        assert unsorted_params != canonical_params
+        with pytest.raises(ValueError, match="canonical form"):
+            generate_evidence_id(
+                source_id="src-csv-abcdef012345",
+                evidence_type_key="missing_value_rate",
+                canonical_source_locator=self._base_locator_str(),
+                canonical_rule_parameters=unsorted_params,
+                normalized_claim_key="data.missing.revenue",
+            )
 
     # --- Two findings from same source must not collide when keys differ ---
 
@@ -1014,6 +1206,80 @@ class TestIdentityCollisionError:
 
 
 # ===========================================================================
+# H.5 TestCheckIdentityCollision — targeted collision API tests
+# ===========================================================================
+
+
+class TestCheckIdentityCollision:
+    """Tests for the new check_identity_collision() registry-aware API.
+
+    This function replaces the incorrect 'existing_digest' parameter pattern
+    where a bare digest was passed without identifying which short_id it belonged to.
+    """
+
+    def test_absent_short_id_no_error(self):
+        """Short ID not in registry: no error."""
+        check_identity_collision("src-csv-aabbccddee00", "a" * 64, {})
+
+    def test_same_short_id_same_digest_no_error(self):
+        """Same short ID + same digest: same identity, no error."""
+        check_identity_collision(
+            "src-csv-aabbccddee00",
+            "a" * 64,
+            {"src-csv-aabbccddee00": "a" * 64},
+        )
+
+    def test_same_short_id_different_digest_raises(self):
+        """Same short ID + different digest: collision."""
+        with pytest.raises(IdentityCollisionError) as exc_info:
+            check_identity_collision(
+                "src-csv-aabbccddee00",
+                "b" * 64,
+                {"src-csv-aabbccddee00": "a" * 64},
+            )
+        assert exc_info.value.short_id == "src-csv-aabbccddee00"
+        assert exc_info.value.existing_digest == "a" * 64
+        assert exc_info.value.new_digest == "b" * 64
+
+    def test_different_short_ids_not_a_collision(self):
+        """Two different short IDs with different digests are NOT a collision.
+
+        An unrelated existing digest in the registry must not create a false
+        collision when the short IDs differ.
+        """
+        sid_a = "src-csv-aaaaaaaaaaaa"
+        sid_b = "src-csv-bbbbbbbbbbbb"
+        digest_a = "a" * 64
+        digest_b = "b" * 64
+
+        # sid_b is in the registry with digest_b.
+        # Checking sid_a with digest_a must not raise.
+        check_identity_collision(sid_a, digest_a, {sid_b: digest_b})  # no error
+        check_identity_collision(sid_b, digest_b, {sid_a: digest_a})  # no error
+
+    def test_registry_collision_requires_same_short_id(self):
+        """A collision only occurs when the same short ID maps to a different digest.
+
+        Different short IDs with different digests (even if digests look like
+        a mismatch) never produce a collision.
+        """
+        registry = {
+            "src-csv-111111111111": "a" * 64,
+            "src-csv-222222222222": "b" * 64,
+        }
+        # These short IDs are not in the registry at all — no collision.
+        check_identity_collision("src-csv-333333333333", "c" * 64, registry)
+        # These are in the registry with the correct digest — no collision.
+        check_identity_collision("src-csv-111111111111", "a" * 64, registry)
+        check_identity_collision("src-csv-222222222222", "b" * 64, registry)
+
+    def test_empty_registry_never_raises(self):
+        """An empty registry never produces a collision."""
+        check_identity_collision("src-csv-aabbccddee00", "a" * 64, {})
+        check_identity_collision("ev-missing_val-012345", "b" * 64, {})
+
+
+# ===========================================================================
 # I. Cross-cutting: ID format compliance across all source types
 # ===========================================================================
 
@@ -1081,3 +1347,130 @@ class TestCrossCuttingFormatCompliance:
 
     def test_sha256_hex_different_inputs(self):
         assert _sha256_hex("hello") != _sha256_hex("world")
+
+
+# ===========================================================================
+# J. Golden identity vectors — frozen v1 byte format
+# ===========================================================================
+
+
+class TestGoldenIdentityVectors:
+    """Fixed, independently computed test vectors that freeze the v1 identity format.
+
+    These values are hardcoded literals.  They must NOT be computed by calling
+    generate_source_id, generate_evidence_id, or _sha256_hex at import time.
+
+    Any change to the identity byte format (separator, normalization, JSON
+    encoding, key ordering) will break these tests — which is exactly the
+    intended signal.
+    """
+
+    # -----------------------------------------------------------------------
+    # Source vector
+    # -----------------------------------------------------------------------
+
+    _SRC_FORMAT = "csv"
+    _SRC_CATEGORY = "data_source"
+    _SRC_CONTENT = "a,b\n1,2\n"
+    _SRC_ALGO = "v1"
+
+    _EXPECTED_SOURCE_ID = "src-csv-de5a97ee1b6f"
+    _EXPECTED_SRC_DIGEST = (
+        "de5a97ee1b6fba4c36d28889fdb30cf136701a2b457d59d1c33c4be30f15623c"
+    )
+
+    def test_source_id_golden(self):
+        """generate_source_id produces the exact expected source_id for the frozen vector."""
+        sid, _ = generate_source_id(
+            source_format=self._SRC_FORMAT,
+            semantic_context_category=self._SRC_CATEGORY,
+            normalized_content=self._SRC_CONTENT,
+            id_algo_version=self._SRC_ALGO,
+        )
+        assert sid == self._EXPECTED_SOURCE_ID, (
+            f"source_id changed from frozen value.  "
+            f"Got {sid!r}, expected {self._EXPECTED_SOURCE_ID!r}.  "
+            "The v1 identity byte format must not be modified."
+        )
+
+    def test_source_digest_golden(self):
+        """generate_source_id produces the exact expected identity_digest."""
+        _, digest = generate_source_id(
+            source_format=self._SRC_FORMAT,
+            semantic_context_category=self._SRC_CATEGORY,
+            normalized_content=self._SRC_CONTENT,
+            id_algo_version=self._SRC_ALGO,
+        )
+        assert digest == self._EXPECTED_SRC_DIGEST, (
+            f"identity_digest changed from frozen value.  "
+            f"Got {digest!r}, expected {self._EXPECTED_SRC_DIGEST!r}.  "
+            "The v1 identity byte format must not be modified."
+        )
+
+    # -----------------------------------------------------------------------
+    # Evidence vector
+    # -----------------------------------------------------------------------
+
+    _EV_SOURCE_ID = "src-csv-de5a97ee1b6f"
+    _EV_TYPE_KEY = "missing_value_rate"
+    _EV_CLAIM_KEY = "data.missing.revenue"
+    _EV_ALGO = "v1"
+
+    _EXPECTED_EVIDENCE_ID = "ev-missing_valu-59cdfb4bad67"
+    _EXPECTED_EV_DIGEST = (
+        "59cdfb4bad67d69966bcb90936b52e4315aedc0989753f8a894d9a35fc6517cc"
+    )
+
+    def _golden_locator(self) -> str:
+        return canonicalize_locator(TabularSourceLocator(columns=["revenue"]))
+
+    def _golden_params(self) -> str:
+        return canonicalize_rule_parameters({"threshold": 0.05})
+
+    def test_evidence_id_golden(self):
+        """generate_evidence_id produces the exact expected evidence_id for the frozen vector."""
+        eid, _ = generate_evidence_id(
+            source_id=self._EV_SOURCE_ID,
+            evidence_type_key=self._EV_TYPE_KEY,
+            canonical_source_locator=self._golden_locator(),
+            canonical_rule_parameters=self._golden_params(),
+            normalized_claim_key=self._EV_CLAIM_KEY,
+            id_algo_version=self._EV_ALGO,
+        )
+        assert eid == self._EXPECTED_EVIDENCE_ID, (
+            f"evidence_id changed from frozen value.  "
+            f"Got {eid!r}, expected {self._EXPECTED_EVIDENCE_ID!r}.  "
+            "The v1 identity byte format must not be modified."
+        )
+
+    def test_evidence_digest_golden(self):
+        """generate_evidence_id produces the exact expected identity_digest."""
+        _, digest = generate_evidence_id(
+            source_id=self._EV_SOURCE_ID,
+            evidence_type_key=self._EV_TYPE_KEY,
+            canonical_source_locator=self._golden_locator(),
+            canonical_rule_parameters=self._golden_params(),
+            normalized_claim_key=self._EV_CLAIM_KEY,
+            id_algo_version=self._EV_ALGO,
+        )
+        assert digest == self._EXPECTED_EV_DIGEST, (
+            f"identity_digest changed from frozen value.  "
+            f"Got {digest!r}, expected {self._EXPECTED_EV_DIGEST!r}.  "
+            "The v1 identity byte format must not be modified."
+        )
+
+    def test_both_golden_values_are_hardcoded_literals(self):
+        """Verify the expected values are literal strings, not computed at runtime.
+
+        This test documents the contract: expected values in this class must
+        be string literals, never computed from the identity functions themselves.
+        """
+        assert isinstance(self._EXPECTED_SOURCE_ID, str)
+        assert isinstance(self._EXPECTED_SRC_DIGEST, str)
+        assert isinstance(self._EXPECTED_EVIDENCE_ID, str)
+        assert isinstance(self._EXPECTED_EV_DIGEST, str)
+        # Check they match the required format patterns.
+        assert _SOURCE_ID_RE.match(self._EXPECTED_SOURCE_ID)
+        assert _DIGEST_RE.match(self._EXPECTED_SRC_DIGEST)
+        assert _EVIDENCE_ID_RE.match(self._EXPECTED_EVIDENCE_ID)
+        assert _DIGEST_RE.match(self._EXPECTED_EV_DIGEST)

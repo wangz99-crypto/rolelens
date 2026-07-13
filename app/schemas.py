@@ -18,7 +18,7 @@ Architecture invariants enforced here:
   - HealthFindingCandidate has no evidence_id field (minting boundary).
   - EvidenceStatus contains only "active" and "invalidated".
   - Cross-object reference existence is NOT validated here.
-  - All models use extra="forbid" and validate_assignment=True.
+  - All models use extra="forbid" and frozen=True.
 """
 
 from __future__ import annotations
@@ -60,12 +60,13 @@ class ContractModel(BaseModel):
     unsupported fields, and HealthFindingCandidate actively rejects
     evidence_id and identity_digest at construction and assignment time.
 
-    validate_assignment=True ensures that setting a field after construction
-    re-runs all field validators, so the schema contract cannot be bypassed
-    by post-construction assignment.
+    frozen=True makes all contract models immutable after construction.
+    This prevents a model_validator from leaving a model in an illegal state
+    after a failed after-validator on single-field assignment.  Revised
+    objects must be reconstructed and validated rather than mutated in place.
     """
 
-    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
 
 # ---------------------------------------------------------------------------

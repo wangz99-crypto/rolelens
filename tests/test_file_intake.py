@@ -281,21 +281,55 @@ class TestIngestCsv:
         with pytest.raises(EmptySourceError):
             ingest_csv(b"\xef\xbb\xbf", semantic_context_category=SemanticContextCategory.data_source, created_at=_FIXED_DT)
 
-    # --- Collision detection ---
+    # --- Collision detection via identity_registry ---
 
-    def test_existing_digest_match_no_error(self):
+    def test_identity_registry_matching_digest_no_error(self):
+        """Same source with its own digest in the registry: no collision."""
         r1 = ingest_csv(_SIMPLE_CSV, semantic_context_category=SemanticContextCategory.data_source, created_at=_FIXED_DT)
         r2 = ingest_csv(
             _SIMPLE_CSV,
             semantic_context_category=SemanticContextCategory.data_source,
             created_at=_FIXED_DT,
-            existing_digest=r1.identity_digest,
+            identity_registry={r1.source_id: r1.identity_digest},
         )
         assert r1.source_id == r2.source_id
 
-    def test_existing_digest_mismatch_raises_collision_error(self):
+    def test_identity_registry_mismatched_digest_raises_collision_error(self):
+        """Same source_id but different digest in registry: collision error."""
+        r1 = ingest_csv(_SIMPLE_CSV, semantic_context_category=SemanticContextCategory.data_source, created_at=_FIXED_DT)
         with pytest.raises(IdentityCollisionError):
             ingest_csv(
+                _SIMPLE_CSV,
+                semantic_context_category=SemanticContextCategory.data_source,
+                created_at=_FIXED_DT,
+                identity_registry={r1.source_id: "a" * 64},
+            )
+
+    def test_identity_registry_unrelated_entry_no_collision(self):
+        """A registry entry for a different source_id must not trigger a collision."""
+        csv_a = b"region,revenue\nNorth,100\n"
+        csv_b = b"region,revenue\nSouth,200\n"
+        r_a = ingest_csv(csv_a, semantic_context_category=SemanticContextCategory.data_source, created_at=_FIXED_DT)
+        r_b = ingest_csv(csv_b, semantic_context_category=SemanticContextCategory.data_source, created_at=_FIXED_DT)
+        assert r_a.source_id != r_b.source_id
+        # Ingesting csv_b with r_a's registry entry must NOT raise:
+        # different source_id ≠ collision.
+        r_b2 = ingest_csv(
+            csv_b,
+            semantic_context_category=SemanticContextCategory.data_source,
+            created_at=_FIXED_DT,
+            identity_registry={r_a.source_id: r_a.identity_digest},
+        )
+        assert r_b2.source_id == r_b.source_id
+
+    def test_no_bare_existing_digest_parameter(self):
+        """ingest_csv must NOT accept a bare existing_digest parameter.
+
+        A bare digest disconnected from a short_id is logically insufficient
+        and has been removed from the API.
+        """
+        with pytest.raises(TypeError):
+            ingest_csv(  # type: ignore[call-arg]
                 _SIMPLE_CSV,
                 semantic_context_category=SemanticContextCategory.data_source,
                 created_at=_FIXED_DT,
@@ -489,11 +523,11 @@ class TestSampleFileIntegration:
     def test_sample_csv_collision_check(self):
         raw = _SAMPLE_CSV_PATH.read_bytes()
         r1 = ingest_csv(raw, semantic_context_category=SemanticContextCategory.data_source, created_at=_FIXED_DT)
-        # Re-ingest with the known digest: must not raise.
+        # Re-ingest with the identity_registry containing the known (source_id, digest): must not raise.
         r2 = ingest_csv(
             raw,
             semantic_context_category=SemanticContextCategory.data_source,
             created_at=_FIXED_DT,
-            existing_digest=r1.identity_digest,
+            identity_registry={r1.source_id: r1.identity_digest},
         )
         assert r1.source_id == r2.source_id

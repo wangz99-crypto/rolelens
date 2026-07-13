@@ -27,14 +27,22 @@ Architecture invariants:
     empty source cannot produce valid evidence.
   - Unsupported formats raise ValueError immediately; callers must not pass
     Excel, form_input, or pdf_text to this function in Task 3.
+  - Collision checking uses the explicit check_identity_collision() API.
+    Callers may pass an identity_registry (short_id → identity_digest) to
+    detect collisions against previously seen sources.  A bare existing_digest
+    disconnected from a short_id is NOT accepted.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Sequence
+from typing import Mapping, Sequence
 
-from app.identity import generate_source_id, normalize_source_content
+from app.identity import (
+    check_identity_collision,
+    generate_source_id,
+    normalize_source_content,
+)
 from app.schemas import (
     SemanticContextCategory,
     SourceFormat,
@@ -106,7 +114,7 @@ def ingest_csv(
     upload_event_id: str | None = None,
     id_algo_version: str = "v1",
     created_at: datetime | None = None,
-    existing_digest: str | None = None,
+    identity_registry: Mapping[str, str] | None = None,
 ) -> SourceManifestEntry:
     """Accept raw CSV bytes and produce a SourceManifestEntry.
 
@@ -125,8 +133,10 @@ def ingest_csv(
         id_algo_version:           Identity algorithm version.  Default "v1".
         created_at:                Timezone-aware datetime.  Defaults to
                                    utc_now() if not provided.
-        existing_digest:           If provided, passed to generate_source_id()
-                                   for collision detection.
+        identity_registry:         Optional mapping of short_id → identity_digest
+                                   used for collision detection.  When provided,
+                                   check_identity_collision() is called with the
+                                   generated (source_id, identity_digest) pair.
 
     Returns:
         SourceManifestEntry with stable source_id and identity_digest.
@@ -134,8 +144,9 @@ def ingest_csv(
     Raises:
         EmptySourceError:          If normalized content is empty.
         ValueError:                If bytes cannot be decoded as UTF-8.
-        IdentityCollisionError:    If existing_digest differs from computed
-                                   digest (propagated from identity.py).
+        IdentityCollisionError:    If identity_registry contains this short_id
+                                   under a different digest (propagated from
+                                   identity.check_identity_collision).
         ValidationError:           If SourceManifestEntry construction fails.
     """
     normalized = normalize_source_content(raw_bytes)
@@ -151,8 +162,14 @@ def ingest_csv(
         semantic_context_category=semantic_context_category.value,
         normalized_content=normalized,
         id_algo_version=id_algo_version,
-        existing_digest=existing_digest,
     )
+
+    if identity_registry is not None:
+        check_identity_collision(
+            short_id=source_id,
+            identity_digest=identity_digest,
+            existing_identities=identity_registry,
+        )
 
     source_scope = _resolve_source_scope(semantic_context_category)
     ts = created_at if created_at is not None else utc_now()
@@ -184,7 +201,7 @@ def ingest_source(
     upload_event_id: str | None = None,
     id_algo_version: str = "v1",
     created_at: datetime | None = None,
-    existing_digest: str | None = None,
+    identity_registry: Mapping[str, str] | None = None,
 ) -> SourceManifestEntry:
     """Dispatch raw source bytes to the appropriate intake handler.
 
@@ -200,7 +217,8 @@ def ingest_source(
         upload_event_id:           Optional upload event identifier.
         id_algo_version:           Identity algorithm version.  Default "v1".
         created_at:                Timezone-aware datetime for provenance.
-        existing_digest:           Optional digest for collision detection.
+        identity_registry:         Optional short_id → identity_digest registry
+                                   for collision detection.
 
     Returns:
         SourceManifestEntry.
@@ -221,7 +239,7 @@ def ingest_source(
         upload_event_id=upload_event_id,
         id_algo_version=id_algo_version,
         created_at=created_at,
-        existing_digest=existing_digest,
+        identity_registry=identity_registry,
     )
 
 
