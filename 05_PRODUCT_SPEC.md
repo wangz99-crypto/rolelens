@@ -1,7 +1,7 @@
 # 05_PRODUCT_SPEC.md — RoleLens
 
-> 更新日期：2026-07-08  
-> 状态：Product Spec v1  
+> 更新日期：2026-07-12
+> 状态：Product Spec v1
 > 项目名称：RoleLens  
 > 参赛方向：IBM AI Builders Challenge Wildcard Challenge — Build Intelligent Systems for the Future of Work
 
@@ -109,19 +109,37 @@ The five entries above are user-visible business perspectives over shared eviden
 
 Internal implementation components are **Evidence Builder**, **Risk Reviewer**, **Workflow Planner**, and **Decision Memo Composer**. Reference-note labels such as Evidence Curator, Finance Reviewer, and Operations Reviewer are not additional product roles.
 
-# 10. Evidence Object Schema
-```json
-{
-  "source_id": "string",
-  "source_type": "structured_data | business_report | industry_context | user_context",
-  "finding": "string",
-  "supporting_evidence": "string",
-  "confidence": "low | medium | high",
-  "limitations": ["string"],
-  "relevant_roles": ["Executive", "Data Analyst", "Data Engineer", "Sales", "Project Manager"],
-  "decision_relevance": "string"
-}
+# 10. Evidence Object Contract
+
+Every Evidence Object must carry a stable `evidence_id` and a `source_locator` linking it to a specific span of the originating source. Role views, risk warnings, workflow steps, and memo claims must each cite at least one `evidence_id`. **No evidence ID, no decision claim.**
+
+```text
+evidence_id:        ev-{evidence_type_abbrev}-{12_hex}
+source_id:          src-{format_abbrev}-{12_hex}
+source_format:      csv | excel | pasted_text | txt | markdown | form_input
+semantic_category:  data_source | internal_report | industry_context |
+                    strategy_profile | business_question | decision_goal | user_assumption
+source_scope:       internal_observation | external_context | user_assertion | decision_context
+evidence_scope:     internal_observation | external_context | assumption | stated_priority
+evidence_type:      rule key (e.g. "missing_value_rate", "outlier_flag")
+extraction_method:  deterministic | llm_assisted
+finding:            string (human-readable; not an identity input)
+supporting_evidence: string
+confidence:         low | medium | high
+limitations:        [string]
+relevant_roles:     [non-empty list]
+decision_relevance: string
+identity_digest:    full SHA-256 hex (stored separately from the display ID)
 ```
+
+**Source and evidence scope rules:**
+- `internal_observation` source → `internal_observation` evidence: may be cited as company-specific fact.
+- `external_context` source → `external_context` evidence: informs but must not be treated as direct company proof.
+- `user_assertion` source → `assumption` evidence: must be labeled as assumption, not verified fact.
+- Strategy goal or profile assertion → `stated_priority` evidence: represents intent, not performance.
+- `decision_context` source (business question, decision goal) → produces no EvidenceObject.
+
+**Minting boundary:** `data_health.py` produces `HealthFindingCandidate` objects without `evidence_id`. Only `evidence_builder.py` converts candidates into `EvidenceObject` records and mints `evidence_id` values.
 
 # 11. Must-Have Features
 1. File intake: CSV / Excel / pasted report text / strategy profile
@@ -176,29 +194,29 @@ Recommended:
 ```text
 Frontend: Streamlit
 Data processing: pandas, openpyxl
-Text parsing: PyMuPDF / pdfplumber
 Schema validation: Pydantic
 AI logic: prompt pipeline + structured output
 Testing: pytest
 Development assistant: IBM Bob
 ```
 
-Optional later:
+Optional later (post-core-pipeline stability):
 ```text
-LangGraph for human-in-the-loop workflow
-Unstructured for richer document parsing
-LlamaIndex if document volume grows
+PyMuPDF / pdfplumber — digitally generated PDF text extraction only
+LangGraph — human-in-the-loop workflow (V1 excluded)
+Unstructured — richer document parsing (V1 excluded)
+LlamaIndex — if document volume grows (V1 excluded)
 ```
 
 # 17. IBM Bob Usage Plan
 IBM Bob should be used for:
-1. Streamlit app skeleton
-2. CSV / Excel parser module
-3. Evidence object schema
-4. Data health check module
-5. Role prompt module
-6. Risk checker module
-7. Decision memo generator
-8. Unit tests
-9. README draft
-10. Debugging and refactoring
+1. Core identity and provenance schemas (`app/schemas.py`)
+2. Deterministic identity module (`app/identity.py`)
+3. CSV and pasted-text intake / source manifest (`app/file_intake.py`, `app/text_parser.py`)
+4. CSV parser and data-health candidates (`app/data_parser.py`, `app/data_health.py`)
+5. Evidence Object builder (`app/evidence_builder.py`)
+6. Role engine and policy enforcement (`app/role_engine.py`)
+7. Risk checker module (`app/risk_checker.py`)
+8. Workflow planner and memo generator (`app/workflow_planner.py`, `app/memo_generator.py`)
+9. Streamlit app shell (`app/main.py`) — after backend pipeline is testable
+10. Unit tests, README draft, debugging and refactoring
