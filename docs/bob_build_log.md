@@ -166,3 +166,123 @@ Task 10 — Streamlit UI shell (app/main.py)
 Task 11 — Integration tests and evaluation scenarios
 Task 12 — README, demo preparation, final documentation
 ```
+
+---
+
+# Entry 002 — First Vertical Slice Implementation (Tasks 1–5)
+
+**Date:** 2026-07-13
+
+**Project Area:** Implementation / Testing / Backend Pipeline
+
+**Type:** Full implementation — source code, tests, sample data
+
+**Prompt Given to IBM Bob:**
+
+```text
+Agent Mode. Continue. Execute the approved five-task implementation sequence.
+Tasks 1–5, no Streamlit, no LLM integration. Commit each task when tests pass.
+```
+
+**Bob Output Summary:**
+
+```text
+Task 1 (29104c2) — app/schemas.py: 13 Pydantic v2 models (ContractModel base,
+  5 enums, 3 locators, SourceLocator union, SourceManifestEntry, EvidenceObject,
+  EvidenceReference, HealthFindingCandidate). tests/test_schemas.py: 234 tests.
+
+Task 2 (9ff0040) — app/identity.py: generate_source_id(), generate_evidence_id(),
+  normalize_source_content(), canonicalize_locator(), canonicalize_rule_parameters(),
+  IdentityCollisionError, _FORMAT_ABBREV stable mapping.
+  tests/test_identity.py: 137 tests covering idempotency, ordering sensitivity,
+  semantic isolation, collision detection, all SourceFormat and
+  SemanticContextCategory combinations.
+
+Task 3 (13ffafe) — app/file_intake.py: ingest_csv(), ingest_source() dispatcher,
+  EmptySourceError, UnsupportedSourceFormatError.
+  app/text_parser.py: parse_pasted_text() for pasted_text / txt / markdown.
+  app/utils.py: utc_now(), to_json_str(), save_run_log().
+  sample_data/regional_sales_q1_q4.csv: 13 rows, 9 columns, deliberate missing
+  values and 1 duplicate row for demo scenario.
+  tests: 3 test files, 121 tests.
+
+Task 4 (d6785a1) — app/data_parser.py: parse_csv() → validated pandas DataFrame.
+  app/data_health.py: analyze_data_health() → DataHealthSummary +
+  list[HealthFindingCandidate] with 6 rule types (duplicate_row,
+  missing_value_rate, mixed_type_column, constant_column, all_null_column,
+  unnamed_column). No evidence_id minted.
+  DataHealthSummary added to app/schemas.py (deferred model, now implemented).
+  normalized_claim_key vocabulary approved and implemented.
+  tests: 2 test files, 88 tests.
+
+Task 5 (0a91464) — app/evidence_builder.py: build_evidence() is the sole
+  evidence_id minting function. Derives evidence_scope from source provenance.
+  Handles duplicates (deduplication by identity), collisions (IdentityCollisionError).
+  Raises EvidenceScopeError for decision_context sources.
+  Raises MissingSourceManifestError for unregistered source_id.
+  tests/test_evidence_builder.py: 47 tests including mock-based collision test,
+  minting boundary enforcement, full pipeline integration test.
+```
+
+**Human Review:**
+
+```text
+All five tasks reviewed and approved as committed.
+No architecture deviations. All invariants from Decision 002 are enforced by tests.
+```
+
+**Manual Changes:**
+
+```text
+- Task 4: Fixed EmptyDataFrameError condition for header-only CSV (zero-row DF).
+- Task 4: Fixed all-null column detection for zero-row DF (vacuously all-null).
+- Task 4: Corrected sample CSV row count assertion (13, not 12).
+- These were caught by the tests and fixed before commit.
+```
+
+**Resulting Files:**
+
+```text
+app/__init__.py                     — empty package init
+app/schemas.py                      — 13 models + DataHealthSummary (Task 4 addition)
+app/identity.py                     — deterministic ID generation
+app/file_intake.py                  — CSV intake
+app/text_parser.py                  — pasted text adapter
+app/utils.py                        — shared helpers
+app/data_parser.py                  — CSV → DataFrame
+app/data_health.py                  — DataFrame → health findings
+app/evidence_builder.py             — sole evidence_id minting boundary
+tests/__init__.py                   — empty test package init
+tests/test_schemas.py               — 234 tests
+tests/test_identity.py              — 137 tests
+tests/test_file_intake.py           — ~60 tests
+tests/test_text_parser.py           — ~44 tests
+tests/test_utils.py                 — ~37 tests
+tests/test_data_parser.py           — 31 tests
+tests/test_data_health.py           — 57 tests
+tests/test_evidence_builder.py      — 47 tests
+sample_data/regional_sales_q1_q4.csv — demo sample data
+requirements.txt                    — pydantic>=2,<3; pandas>=2,<3; pytest>=8,<9
+```
+
+**Test / Verification:**
+
+```text
+627 / 627 tests passing. 0 failures. 0 warnings.
+python -m pytest -q → 627 passed in ~1.2s
+git diff --check → clean (no trailing whitespace)
+git status → working tree clean after all commits
+```
+
+**Related Commits:**
+
+```text
+29104c2  feat(schemas): core identity and provenance contract — Task 1
+9ff0040  feat(identity): deterministic source and evidence ID generation — Task 2
+13ffafe  feat(intake): CSV and pasted-text source intake, utils, sample data — Task 3
+d6785a1  feat(data-health): CSV parsing, deterministic health analysis, DataHealthSummary — Task 4
+0a91464  feat(evidence-builder): Evidence Object minting, scope derivation, deduplication — Task 5
+```
+
+**Evidence Saved:** Yes
+

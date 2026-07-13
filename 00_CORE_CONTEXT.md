@@ -1,6 +1,6 @@
 # 00_CORE_CONTEXT.md — RoleLens
 
-> Updated: 2026-07-12
+> Updated: 2026-07-13
 > Status: Canonical project context
 > Purpose: Shared source of truth for IBM Bob, Codex, and human review.
 
@@ -55,15 +55,25 @@ Mixed business materials
 
 ## Current Phase
 
-**Phase 2 — MVP Build and Architecture Validation**
+**Phase 2 — MVP Build: First Vertical Slice Complete**
 
-Direction selection, the five-role policy, and the first evaluation plan are complete. The next proof point is a working, testable prototype.
+The five-task backend pipeline is implemented, tested, and committed. 627 tests pass (0 failures). No LLM, no Streamlit yet. The evidence provenance chain is fully functional end-to-end from CSV bytes to minted EvidenceObject records.
+
+**Completed commits (branch: chore/project-foundation):**
+
+| Commit | Task | Tests Added |
+|---|---|---|
+| 0a91464 | Task 5 — Evidence Object builder | 47 |
+| d6785a1 | Task 4 — CSV parsing and data health | 88 |
+| 13ffafe | Task 3 — CSV and pasted-text intake | 121 |
+| 9ff0040 | Task 2 — Deterministic identity | 137 |
+| 29104c2 | Task 1 — Core schemas | 234 |
 
 ## Current Top Risks
 
 1. The output may still look like a generic CSV chatbot unless the demo exposes evidence IDs, role boundaries, and dependencies.
-2. Source-span traceability and evidence identity contracts are approved but not yet implemented in code.
-3. IBM Bob usage must be demonstrated with actual build artifacts, prompts, changes, and verification—not only a statement in the README.
+2. Role engine, risk checker, workflow planner, memo generator, and Streamlit UI are not yet implemented — competition deadline pressure.
+3. IBM Bob usage must be demonstrated with actual build artifacts, prompts, changes, and verification — not only a statement in the README.
 
 ## Locked Decisions
 
@@ -77,35 +87,35 @@ Direction selection, the five-role policy, and the first evaluation plan are com
 
 ## Open Questions
 
-1. Runtime LLM / IBM model choice
-2. Exact sample dataset schema
-3. How much human editing V1 supports
-4. First 48-hour prototype pass/fail criteria
-5. `normalized_claim_key` vocabulary — to be approved during Task 4 design review
+1. Runtime LLM / IBM model choice (blocks role engine AI output)
+2. How much human editing V1 supports
+3. First 48-hour prototype pass/fail criteria
+4. Role engine design: how RoleView citations are structured for the demo
+
+**Resolved open questions:**
+- `normalized_claim_key` vocabulary — approved and implemented in `app/data_health.py` (Task 4)
+- Sample dataset schema — `sample_data/regional_sales_q1_q4.csv` (13 rows, 9 columns, deliberate quality issues)
 
 ## Next Deliverable
 
-First five implementation tasks (approved sequence):
+**Phase 2 continuation — role engine and Streamlit demo pipeline:**
 
 ```text
-Task 1 — Core identity and provenance schemas (app/schemas.py, app/identity.py stubs)
-Task 2 — Deterministic identity and canonicalization (app/identity.py)
-Task 3 — CSV and minimal pasted-text intake / source manifests (app/file_intake.py, app/text_parser.py)
-Task 4 — CSV parsing and deterministic data-health candidates (app/data_parser.py, app/data_health.py)
-Task 5 — Evidence Object builder (app/evidence_builder.py)
+Task 6  — RoleView schemas + role_engine.py (loads role_policy.json, emits RoleView citing evidence_id)
+Task 7  — RiskResult schema + risk_checker.py
+Task 8  — WorkflowStep schema + workflow_planner.py
+Task 9  — HumanReviewAction + DecisionMemo schemas + memo_generator.py
+Task 10 — app/main.py (Streamlit UI — 6 tabs, demo scenario with sample_data)
 ```
 
-After Task 5, the first executable vertical slice produces:
-
+Minimum demo scenario:
 ```text
-CSV upload + pasted business context
-→ SourceManifestEntry records with stable source_id values
-→ DataHealthSummary and HealthFindingCandidate objects
-→ EvidenceObject records with stable evidence_id values
-→ (subsequent tasks) five policy-constrained role cards, risk checks, reviewed decision memo
+regional_sales_q1_q4.csv + pasted industry context
+→ EvidenceObject records (already working)
+→ five role cards with evidence citations
+→ risk flags for missing Q3/Q4 revenue and external context scope
+→ human-reviewed decision memo
 ```
-
-The vertical slice must include at least one evaluation scenario and one real IBM Bob build-log entry.
 
 ## Non-Negotiable Competition Rules
 
