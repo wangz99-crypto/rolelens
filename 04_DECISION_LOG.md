@@ -1,6 +1,6 @@
 # 04_DECISION_LOG.md — RoleLens 决策记录
 
-> 更新日期：2026-07-12
+> 更新日期：2026-07-14
 > 状态：Active
 
 ## Decision 001
@@ -193,9 +193,9 @@ The exact `format_abbrev` and `evidence_type_abbrev` values are defined and test
 
 `data_health.py` produces `HealthFindingCandidate` objects. These are structured finding candidates with no `evidence_id` field.
 
-Only `evidence_builder.py` converts validated `HealthFindingCandidate` objects into `EvidenceObject` records and mints `evidence_id` values. No other module may generate `evidence_id`.
+`app/identity.py` computes deterministic identity values. Only `evidence_builder.py` converts approved candidate objects into `EvidenceObject` records. No other production module may construct Evidence Objects from candidates.
 
-An empty `HealthFindingCandidate` input to `evidence_builder.py` is valid and returns an empty evidence list. It is not automatically a hard failure.
+An empty candidate input to `evidence_builder.py` is valid and returns an empty evidence list. It is not automatically a hard failure.
 
 Identity generation belongs in `app/identity.py`, not `app/utils.py`. `app/utils.py` retains shared helpers: timestamp formatting, JSON serialization, run log persistence.
 
@@ -261,8 +261,217 @@ Task 1 must be completed and tests must pass before Task 2 begins. Each subseque
 3. Integration test (Task 5 or later): same `HealthFindingCandidate` list always produces the same `evidence_id` values.
 4. Edge-case tests: duplicate candidate → deduplication (no second object); collision path → `IdentityCollisionError` raised.
 
+
+### Post-Implementation Validation Update — 2026-07-14
+
+Tasks 1–5 and the independent identity/provenance repair are complete.
+
+Validated outcomes:
+
+- public identity APIs reject invalid formats and non-canonical identity inputs;
+- short-ID collision checks require the same short ID with a different full digest;
+- candidate and manifest provenance mismatches fail closed;
+- duplicate source manifests cannot silently overwrite each other;
+- contract models are frozen to prevent partial invalid mutation;
+- canonical locator and rule-parameter JSON is enforced;
+- hardcoded golden identity vectors lock the current V1 byte format;
+- the full repository suite reports 675 passing tests with zero failures.
+
+The original risk that `normalized_claim_key` vocabulary was unresolved is closed for deterministic data-health outputs. A separate bounded vocabulary is required for Task 5B text/context candidates.
+
+The remaining storage concern is not the collision algorithm itself but persistence of the short-ID → full-digest registry in future decision trajectories.
+
 ### Status
-Approved — 2026-07-12
+Approved and implementation-validated — 2026-07-14
 
 ### Revisit Date
-After Task 2 and Task 5 tests pass.
+After Task 5B integration and saved decision-trajectory persistence.
+
+---
+
+## Decision 003
+
+**Date:** 2026-07-14  
+**Area:** Text Evidence Completion and Grounded Role-Engine Sequence
+
+### Decision
+
+Before implementing the production Role Engine, add a bounded deterministic text/context evidence stage and adopt claim-level grounding for role outputs.
+
+The approved implementation order is:
+
+```text
+Task 5B — Text and structured-context evidence completion
+Task 6A — Grounded role contracts and provider-neutral Role Engine
+Task 6B — One live provider adapter and measured runtime behavior
+Task 7  — Risk Checker
+Task 8  — Workflow Planner
+Task 9  — Human review and Decision Memo
+Task 10 — Streamlit UI
+```
+
+### Context
+
+Two local disposable Codex spikes were used to discover implementation risks. The Task 6 spike showed that the current real sample produces only data-health Evidence Objects relevant mainly to Data Analyst and Data Engineer. Executive and Sales therefore lack admissible evidence, and Project Manager generation cannot safely proceed.
+
+The Task 5B spike compared three candidate-model options and tested deterministic exact-source extraction for industry context, strategy priorities, user assumptions, business questions, and decision goals.
+
+The spike code remains local-only. It is not production code and will not be merged, cherry-picked, copied, or pushed.
+
+### Approved Task 5B Candidate Contract
+
+Add `TextEvidenceCandidate` alongside `HealthFindingCandidate`.
+
+Do not:
+
+- reuse the health-specific type as the permanent text contract;
+- replace both types with a generic `EvidenceCandidate`;
+- call an LLM;
+- summarize or infer business findings.
+
+Allowed evidence-producing categories:
+
+| Category | Extraction granularity | Evidence scope |
+|---|---|---|
+| `industry_context` | one nonblank normalized paragraph | `external_context` |
+| `strategy_profile` | one structured form field | `stated_priority` |
+| `user_assumption` | one structured form field | `assumption` |
+
+Context-only categories:
+
+| Category | Behavior |
+|---|---|
+| `business_question` | source/trajectory context; no candidate and no Evidence Object |
+| `decision_goal` | source/trajectory context; no candidate and no Evidence Object |
+
+For Task 5B:
+
+```text
+finding = exact normalized excerpt
+supporting_evidence = exact normalized excerpt
+```
+
+Evidence type, normalized claim key, and extraction-policy version are fixed by the system according to semantic category. They are not free-form caller inputs.
+
+### Provenance Invariants
+
+The production implementation must fail closed unless:
+
+```text
+candidate.source_id matches a registered manifest
+candidate.source_format == manifest.source_format
+candidate.semantic_context_category == manifest.semantic_context_category
+structured candidate category == UserContextLocator.context_category
+scope is derived from the manifest, never selected by the candidate
+```
+
+Text locators must preserve inclusive line and character spans, paragraph index, and excerpt checksum after approved source normalization.
+
+### Role-Relevance Decision
+
+`relevant_roles` uses only canonical machine keys:
+
+```text
+executive
+data_analyst
+data_engineer
+sales_marketing
+project_manager
+```
+
+It is a routing hint, not an admissibility guarantee or proof that a role may use an external source as an internal fact.
+
+### Grounded Role Contract
+
+Task 6A must use claim-level grounding:
+
+```text
+GroundedFinding:
+  claim
+  evidence_references
+  confidence
+```
+
+A `RoleView` contains a nonempty list of `GroundedFinding` records rather than one free-form key finding with view-level citations.
+
+Required behavior:
+
+- every grounded claim cites at least one unique active Evidence Object;
+- every cited ID existed in and was exposed to that provider request;
+- the returned role key matches the requested role;
+- invalid, fabricated, hidden, or invalidated references fail closed;
+- malformed JSON, Markdown-fenced JSON, trailing prose, missing fields, and extra fields do not render;
+- no admissible evidence returns typed `InsufficientEvidence`, no role card, and `next_action = None`;
+- a next action requires at least one grounded finding;
+- natural-language semantic overreach is not falsely presented as fully deterministic enforcement.
+
+### Provider and Call-Graph Decision
+
+Task 6A defines a provider-neutral synchronous protocol and a deterministic, visibly offline test provider.
+
+Task 6B adds one live provider adapter.
+
+A successful conceptual batch may require four independent business-role calls followed by a sequential Project Manager call. This five-call design is **provisional**, not locked. Before final adoption, measure:
+
+- serial and parallel latency;
+- prompt and completion cost;
+- timeout and retry behavior;
+- rate-limit behavior;
+- three-minute demo impact.
+
+A mock provider must never silently substitute for a failed live provider.
+
+### Alternatives Considered
+
+| Alternative | Decision | Reason |
+|---|---|---|
+| Reuse `HealthFindingCandidate` for text | Rejected | Minimal migration but semantically misleading and loses bounded text-specific rules |
+| Replace all candidates with generic `EvidenceCandidate` | Rejected for V1 | Broad migration and weaker type-specific safeguards |
+| Entire text field as one Evidence Object | Rejected | Locator and citation become too coarse |
+| Sentence/LLM claim extraction | Rejected for V1 | Adds inference risk and unnecessary complexity |
+| View-level citations only | Rejected | Permits citation laundering across unsupported claims |
+| Generate generic role cards without evidence | Rejected | Violates “No evidence ID, no decision claim” |
+| Merge or copy Codex spike implementation | Rejected | IBM Bob must independently implement official production code |
+
+### Main Risks
+
+1. Exact-source evidence prevents invented findings but does not prove source truth or semantic entailment.
+2. External context can still be mischaracterized as company-specific proof unless Task 7 and human review catch it.
+3. Free-text role policies cannot all be deterministically enforced.
+4. The five-call model may exceed demo latency or provider budget.
+5. The final B2B SaaS demo still needs internal evidence capable of supporting bounded Executive and Sales findings without unsupported ROI or broad-outreach recommendations.
+
+### Validation Method
+
+Task 5B must prove:
+
+- stable source and evidence identities;
+- semantic-category isolation;
+- precise excerpt locators;
+- duplicate handling;
+- exact excerpt preservation;
+- decision-context exclusion;
+- correct evidence-scope derivation;
+- category/format/locator/manifest consistency;
+- canonical machine role keys;
+- no direct EvidenceObject construction outside `evidence_builder.py`;
+- all existing production tests remain green.
+
+Task 6A must prove:
+
+- runtime role-policy/schema alignment;
+- per-role input isolation;
+- claim-level citation integrity;
+- strict structured-output parsing;
+- typed failure isolation;
+- Project Manager sequencing;
+- explicit offline-provider metadata;
+- no role card when evidence is insufficient.
+
+### Status
+
+Approved for independent IBM Bob implementation.
+
+### Revisit Date
+
+After Task 5B production tests pass and after Task 6B live-provider latency/cost measurements.

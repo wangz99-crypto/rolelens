@@ -1,48 +1,77 @@
 # 06_ARCHITECTURE_CODE_MAP.md — RoleLens
 
-> 更新日期：2026-07-12
-> 状态：Architecture Draft v2 — Identity and Provenance Contract Approved
+> 更新日期：2026-07-14
+> 状态：Architecture v3 — Task 5B and grounded Role Engine sequence approved
 
 # 1. Architecture Overview
 
 ```text
 User Inputs
-CSV / Excel + Pasted Text + Strategy Profile + Business Question
+CSV + Pasted Industry Context + Strategy Profile + User Assumption
++ Business Question + Decision Goal
         ↓
-file_intake.py  +  text_parser.py (minimal pasted-text adapter)
+┌──────────────────────────┬────────────────────────────────────┐
+│ file_intake.py           │ text_parser.py / form-input intake │
+│ CSV source registration  │ context source registration        │
+└──────────────────────────┴────────────────────────────────────┘
         ↓
-SourceManifestEntry records  (source_id, identity_digest, source_scope)
+SourceManifestEntry records
+(source_id, identity_digest, semantic category, source_scope)
         ↓
-┌────────────────────────┬──────────────────────────────┐
-│ data_parser.py         │ text_parser.py               │
-│ (CSV → DataFrame)      │ (pasted text → TextChunk)    │
-└────────────────────────┴──────────────────────────────┘
-        ↓                            ↓
-data_health.py               (future text evidence extraction)
-HealthFindingCandidate list  (no evidence_id)
-        ↓
-        └──────── evidence_builder.py ────────┘
-                          ↓
-              EvidenceObject records (evidence_id minted here only)
-                          ↓
-              RoleLens Decision Engine  (role_engine.py)
-              Loads role_policy.json at runtime
-                          ↓
- Executive | Data Analyst | Data Engineer | Sales/Marketing | PM
- Each RoleView cites evidence_id values; forbidden inputs enforced
-                          ↓
-              risk_checker.py
-              Enforces: external_context ≠ direct company proof
-              Critical risks block or qualify affected execution actions
-                          ↓
-               workflow_planner.py
-               WorkflowStep records cite evidence_id values
-                          ↓
-              Decision draft state → Human Review Interface
-                          ↓
-              memo_generator.py  (post human review)
-              Final DecisionMemo cites evidence_id values
+┌──────────────────────────────────┬─────────────────────────────────────┐
+│ data_parser.py                   │ context_evidence.py — Task 5B      │
+│ CSV → validated DataFrame        │ deterministic exact-source extract │
+│        ↓                         │                                     │
+│ data_health.py                   │ industry paragraph / form field     │
+│ DataHealthSummary                │        ↓                            │
+│ HealthFindingCandidate list      │ TextEvidenceCandidate list          │
+└──────────────────────────────────┴─────────────────────────────────────┘
+                         ↓
+              evidence_builder.py
+      explicit approved candidate union → EvidenceObject
+      identity.py computes IDs; builder constructs records
+                         ↓
+             EvidenceObject registry
+(active status, scope, exact locator, full digest)
+                         ↓
+              Task 6A — Role Engine
+- loads and validates role_policy.json
+- deterministic per-role input projection
+- strict structured-output parsing
+- claim-level GroundedFinding validation
+- typed failures / InsufficientEvidence
+- deterministic visibly-offline provider for tests
+                         ↓
+       Executive | Analyst | Engineer | Sales
+          independent conceptual role calls
+                         ↓
+            Project Manager generated last
+        only after all required upstream success
+                         ↓
+              Task 6B — Live Provider Adapter
+- one provider
+- credentials / timeout / retry controls
+- latency and cost measurement
+- no silent mock fallback
+                         ↓
+              Task 7 — risk_checker.py
+- unsupported claims
+- external context used as internal proof
+- assumptions represented as facts
+- role overreach and missing prerequisites
+                         ↓
+              Task 8 — workflow_planner.py
+- ordered cross-role actions
+- dependencies and blocked steps
+                         ↓
+       Task 9 — Human Review + memo_generator.py
+                         ↓
+              Task 10 — Streamlit UI
 ```
+
+Business question and decision goal produce `decision_context` source records but no Evidence Objects.
+
+The conceptual five-call role design is provisional. Four non-PM roles may later run in parallel; Project Manager remains sequential. Final adoption depends on measured live-provider latency and cost.
 
 # 2. Recommended Project Structure
 
@@ -51,259 +80,392 @@ HealthFindingCandidate list  (no evidence_id)
 The architecture has two distinct layers:
 
 - **User-visible views:** Executive, Data Analyst / Data Scientist, Data Engineer, Sales / Marketing, and Project Manager.
-- **Internal bounded components:** Evidence Builder, Risk Reviewer, Workflow Planner, and Decision Memo Composer.
+- **Internal bounded components:** Evidence Builder, Role Engine, Risk Reviewer, Workflow Planner, and Decision Memo Composer.
 
-The user-visible views apply policy to shared Evidence Objects. Internal components perform processing steps and must not be presented as extra AI coworkers. `role_policy.json` is the machine-readable authority for the five business-role boundaries.
+The user-visible views apply policy to shared Evidence Objects. Internal components perform bounded processing steps and must not be presented as extra AI coworkers. `config/role_policy.json` is the machine-readable authority for the five business-role boundaries.
 
 ```text
 rolelens/
 ├── app/
 │   ├── __init__.py
-│   ├── schemas.py          ← Task 1: all provenance/identity Pydantic models
-│   ├── identity.py         ← Task 2: deterministic ID generation (not utils.py)
-│   ├── file_intake.py      ← Task 3: source intake → SourceManifestEntry
-│   ├── text_parser.py      ← Task 3: minimal pasted-text adapter
-│   ├── utils.py            ← Task 3: shared helpers (timestamps, JSON, log save)
-│   ├── data_parser.py      ← Task 4: CSV → DataFrame
-│   ├── data_health.py      ← Task 4: DataFrame → HealthFindingCandidate list
-│   ├── evidence_builder.py ← Task 5: candidates → EvidenceObject (minting only here)
-│   ├── role_engine.py      ← later: policy-constrained role views
-│   ├── risk_checker.py     ← later: risk flags citing evidence_id
-│   ├── workflow_planner.py ← later: WorkflowStep records
-│   ├── memo_generator.py   ← later: post-human-review DecisionMemo
-│   └── main.py             ← later: Streamlit UI (after backend is testable)
+│   ├── schemas.py          ← implemented + Task 5B/6A schema extensions
+│   ├── identity.py         ← implemented: deterministic ID generation
+│   ├── file_intake.py      ← implemented: CSV source intake
+│   ├── text_parser.py      ← implemented: pasted-text source manifest
+│   ├── utils.py            ← implemented: timestamps and shared helpers
+│   ├── data_parser.py      ← implemented: CSV → DataFrame
+│   ├── data_health.py      ← implemented: deterministic tabular candidates
+│   ├── context_evidence.py ← Task 5B: exact text/form evidence candidates
+│   ├── evidence_builder.py ← implemented; Task 5B candidate-union extension
+│   ├── role_engine.py      ← Task 6A: grounded provider-neutral role engine
+│   ├── risk_checker.py     ← Task 7
+│   ├── workflow_planner.py ← Task 8
+│   ├── memo_generator.py   ← Task 9
+│   └── main.py             ← Task 10: Streamlit UI
 ├── config/
-│   └── role_policy.json    ← runtime role boundary authority (exists)
-├── prompts/                ← later: LLM prompt templates
-├── sample_data/            ← Task 3: sample CSV for reproducible demo
+│   └── role_policy.json    ← runtime role boundary authority
+├── prompts/                ← Task 6B provider prompt templates
+├── sample_data/            ← reproducible backend and final demo fixtures
 ├── outputs/
-│   └── run_logs/           ← JSON decision trajectories
+│   └── run_logs/           ← future JSON decision trajectories
 ├── tests/
-│   ├── __init__.py
-│   ├── test_schemas.py     ← Task 1
-│   ├── test_identity.py    ← Task 2
-│   ├── test_file_intake.py ← Task 3
-│   ├── test_text_parser.py ← Task 3
-│   ├── test_data_parser.py ← Task 4
-│   ├── test_data_health.py ← Task 4
-│   └── test_evidence_builder.py ← Task 5
+│   ├── test_schemas.py
+│   ├── test_identity.py
+│   ├── test_file_intake.py
+│   ├── test_text_parser.py
+│   ├── test_data_parser.py
+│   ├── test_data_health.py
+│   ├── test_context_evidence.py   ← Task 5B
+│   ├── test_evidence_builder.py
+│   └── test_role_engine.py        ← Task 6A
 ├── docs/
 ├── README.md
 └── requirements.txt
 ```
 
-`app/config.py` is deferred — no config needs beyond `role_policy.json` exist yet.
+A live-provider adapter filename is not locked until Task 6B provider selection. Do not add `app/config.py`, agent frameworks, vector storage, or provider abstractions beyond the minimum accepted protocol.
 
 # 3. Core Schemas
 
-*All schemas defined in `app/schemas.py`. Schema models are grouped by implementation task.*
+*All production schema models are defined in `app/schemas.py` and added only in their approved task.*
 
-## Task 1 — Core Identity and Provenance Schemas
+## Implemented — Identity, Provenance, and Data Health
 
 ### Enums
 
 ```text
-SourceFormat:           csv | excel | pasted_text | txt | markdown | form_input
-                        (pdf_text: delayed optional support)
+SourceFormat:            csv | excel | pasted_text | txt | markdown | form_input
+                         (pdf_text delayed)
 
 SemanticContextCategory: data_source | internal_report | industry_context |
-                          strategy_profile | business_question | decision_goal |
-                          user_assumption
+                         strategy_profile | business_question | decision_goal |
+                         user_assumption
 
-SourceScope:            internal_observation | external_context |
-                        user_assertion | decision_context
+SourceScope:             internal_observation | external_context |
+                         user_assertion | decision_context
 
-EvidenceScope:          internal_observation | external_context |
-                        assumption | stated_priority
+EvidenceScope:           internal_observation | external_context |
+                         assumption | stated_priority
 
-EvidenceStatus:         active | invalidated
+EvidenceStatus:          active | invalidated
 ```
 
-### Source Locator Models (discriminated union, discriminator = locator_type)
+### Source Locator Union
 
 ```text
-TabularSourceLocator    locator_type="tabular"
-  columns: list[str]                    required
-  row_range: tuple[int,int] | None      optional
-  sheet_name: str | None                optional  (Excel only)
-  cell_range: str | None                optional  (Excel only)
-  metric: str | None                    optional
-  aggregation: str | None               optional
-
-TextSourceLocator       locator_type="text"
-  line_start: int | None                optional
-  line_end: int | None                  optional
-  char_start: int | None                optional
-  char_end: int | None                  optional
-  heading_path: str | None              optional
-  paragraph_index: int | None           optional
-  chunk_index: int | None               optional
-  excerpt_checksum: str | None          optional
-
-UserContextLocator      locator_type="user_context"
-  field_name: str                       required
-  form_section: str | None              optional
-  context_category: SemanticContextCategory  required
-  user_entered_version: str | None      optional
-
-SourceLocator = Annotated[Union[Tabular, Text, UserContext], discriminator="locator_type"]
+TabularSourceLocator
+TextSourceLocator
+UserContextLocator
 ```
+
+Each locator is a frozen, extra-forbidden Pydantic model. `SourceLocator` is a discriminated union using `locator_type`.
 
 ### SourceManifestEntry
 
 ```text
-source_id: str                          required  src-{format_abbrev}-{12_hex}
-identity_digest: str                    required  full SHA-256 hex (64 chars)
-source_format: SourceFormat             required
-semantic_context_category: SemanticContextCategory  required
-source_scope: SourceScope               required
-filename: str | None                    optional  excluded from identity
-upload_event_id: str | None             optional  excluded from identity
-id_algo_version: str                    required  default "v1"
-created_at: datetime                    required
+source_id
+identity_digest
+source_format
+semantic_context_category
+source_scope
+filename
+upload_event_id
+id_algo_version
+created_at
 ```
+
+### DataHealthSummary
+
+Implemented deterministic summary:
+
+```text
+source_id
+row_count
+column_count
+duplicate_row_count
+missing_value_rates
+columns_with_mixed_types
+constant_columns
+schema_issues
+```
+
+No readiness score exists because no defensible scoring method has been approved.
+
+### HealthFindingCandidate
+
+Deterministic tabular pre-minting candidate. It contains identity inputs and human-readable evidence fields but no `evidence_id`.
 
 ### EvidenceObject
 
 ```text
-evidence_id: str                        required  ev-{type_abbrev}-{12_hex}
-identity_digest: str                    required  full SHA-256 hex (64 chars)
-source_id: str                          required
-source_format: SourceFormat             required
-source_locator: SourceLocator           required  typed discriminated union
-evidence_type: str                      required  rule key e.g. "missing_value_rate"
-evidence_scope: EvidenceScope           required
-extraction_method: "deterministic"|"llm_assisted"  required
-finding: str                            required  human-readable; NOT an identity input
-supporting_evidence: str                required
-confidence: "low"|"medium"|"high"       required
-limitations: list[str]                  required  empty list allowed
-relevant_roles: list[str]               required  must be non-empty
-decision_relevance: str                 required
-id_algo_version: str                    required  default "v1"
-created_by: "data_health"|"evidence_builder"|"llm_pipeline"  required
-status: EvidenceStatus                  required  default "active"
-invalidated_reason: str | None          optional  required when status=="invalidated"
+evidence_id
+identity_digest
+source_id
+source_format
+source_locator
+evidence_type
+evidence_scope
+extraction_method
+finding
+supporting_evidence
+confidence
+limitations
+relevant_roles
+decision_relevance
+id_algo_version
+created_by
+status
+invalidated_reason
 ```
 
 ### EvidenceReference
 
-```text
-evidence_id: str                        required  format validated; existence not validated at schema level
-relevance_note: str | None              optional
-```
+Validates reference syntax only. Runtime existence, active status, exposure to a provider request, and semantic use are checked downstream.
 
-Cross-object referential integrity (does this `evidence_id` exist in the current trajectory?) is handled by a separate registry or trajectory validation function — not by the Pydantic model alone.
+## Task 5B — TextEvidenceCandidate
 
-### HealthFindingCandidate
+`TextEvidenceCandidate` coexists with `HealthFindingCandidate`.
 
-```text
-source_id: str                          required
-source_format: SourceFormat             required
-source_locator: SourceLocator           required
-evidence_type: str                      required  rule key
-canonical_rule_parameters: dict         required  deterministic rule inputs
-normalized_claim_key: str               required  short stable key, not free-form text
-finding: str                            required
-supporting_evidence: str                required
-confidence: "low"|"medium"|"high"       required
-limitations: list[str]                  required
-relevant_roles: list[str]               required  non-empty
-decision_relevance: str                 required
-```
-
-**No `evidence_id` field.** This type enforces the minting boundary: `data_health.py` produces `HealthFindingCandidate`; only `evidence_builder.py` produces `EvidenceObject`.
-
-## Deferred Schema Models (later tasks — not yet implemented)
+Minimum contract:
 
 ```text
-DataHealthSummary     Task 4
-RoleView              Role engine task
-RiskResult            Risk checker task
-WorkflowStep          Workflow planner task
-HumanReviewAction     Human review task
-DecisionMemo          Memo generator task
-DecisionTrajectory    Integration task
+source_id
+source_format
+source_locator
+semantic_context_category
+exact_excerpt
+confidence
+limitations
+relevant_roles
+decision_relevance
 ```
 
-These models are not yet defined. They will be added to `app/schemas.py` in their respective tasks.
+Identity-bearing evidence type, normalized claim key, and extraction-policy version are system-controlled according to semantic category. They must not be arbitrary caller-authored values.
+
+Allowed evidence-producing categories:
+
+```text
+industry_context
+strategy_profile
+user_assumption
+```
+
+Context-only categories:
+
+```text
+business_question
+decision_goal
+```
+
+Required invariants:
+
+```text
+candidate category == manifest category
+candidate format == manifest format
+structured candidate category == UserContextLocator category
+scope comes from manifest
+finding == exact normalized excerpt
+supporting_evidence == exact normalized excerpt
+```
+
+## Task 6A — Grounded Role Schemas
+
+### RoleKey
+
+```text
+executive
+data_analyst
+data_engineer
+sales_marketing
+project_manager
+```
+
+### GroundedFinding
+
+```text
+claim: nonblank string
+evidence_references: nonempty unique list[EvidenceReference]
+confidence: low | medium | high
+```
+
+### RoleView
+
+```text
+role_key
+role_concern
+key_findings: nonempty list[GroundedFinding]
+risks_or_assumptions
+missing_information
+next_action: str | None
+dependency: str | None
+human_review_required
+```
+
+### Typed Role-Generation Failures
+
+At minimum, distinguish:
+
+```text
+ProviderFailure
+ParseFailure
+SchemaFailure
+EvidenceReferenceFailure
+InsufficientEvidence
+RoleMismatchFailure
+PolicyConfigurationFailure
+UpstreamRoleFailure
+```
+
+These may be typed result records or exceptions according to the approved Task 6A design, but invalid outputs must never render as role cards.
+
+## Deferred Schemas
+
+```text
+RiskResult            Task 7
+WorkflowStep          Task 8
+HumanReviewAction     Task 9
+DecisionMemo          Task 9
+DecisionTrajectory    Integration / run-log task
+```
 
 # 4. Module Map
 
-## schemas.py *(Task 1)*
-Purpose: all Pydantic models for identity, provenance, and evidence contracts.
-Input: none (pure definition).
-Output: importable models — `SourceFormat`, `SemanticContextCategory`, `SourceScope`, `EvidenceScope`, `EvidenceStatus`, locator models, `SourceLocator` union, `SourceManifestEntry`, `EvidenceObject`, `EvidenceReference`, `HealthFindingCandidate`.
-Failure cases: missing required field raises `ValidationError`; invalid `evidence_id` format rejected.
+## schemas.py
+Purpose: frozen Pydantic contracts for identity, provenance, candidates, evidence, data health, and later grounded role results.
+Failure cases: missing/extra fields, invalid identity syntax, incompatible format/locator/category combinations, invalid status transitions.
 
-## identity.py *(Task 2)*
-Purpose: deterministic `source_id` and `evidence_id` generation, content normalization, canonical locator serialization, and `IdentityCollisionError`.
-Input: `source_format`, `semantic_context_category`, normalized content → `(source_id, identity_digest)`. `source_id`, `evidence_type_key`, locator, rule params, claim key → `(evidence_id, identity_digest)`.
-Output: short hybrid ID + full SHA-256 `identity_digest`.
-Failure cases: short ID match with different `identity_digest` → `IdentityCollisionError`. `identity_digest` must be persisted alongside the short ID — not in-memory only.
-Note: identity generation belongs here, not in `utils.py`.
+## identity.py
+Purpose: deterministic `source_id` and `evidence_id` computation, source normalization, canonical serialization, and collision checking.
+Important boundary: identity.py computes IDs; it does not construct EvidenceObject records.
+Failure cases: invalid identity inputs, non-canonical JSON, same short ID with a different full digest.
 
-## file_intake.py *(Task 3)*
-Purpose: accept a CSV file or pasted text; normalize content; call `identity.py`; emit `SourceManifestEntry` records.
-Input: raw bytes + `SourceFormat` declaration + `SemanticContextCategory`.
-Output: `list[SourceManifestEntry]` with stable `source_id` and `identity_digest`.
-Failure cases: empty file, unsupported format, encoding failure, missing `semantic_context_category`.
+## file_intake.py
+Purpose: accept CSV bytes, normalize content, register a `SourceManifestEntry`, and optionally validate against a short-ID → digest registry.
+Input: raw CSV bytes + semantic category.
+Output: one `SourceManifestEntry`.
+Failure cases: empty source, unsupported format, encoding failure, identity collision.
 
-## text_parser.py *(Task 3 — minimal adapter)*
-Purpose: accept pasted text; normalize; produce a `SourceManifestEntry` and a `TextSourceLocator` for use by `evidence_builder.py`. No chunking, no section splitting, no PDF handling in V1 first slice.
-Input: raw pasted string + `SemanticContextCategory`.
-Output: `SourceManifestEntry`.
-Later extensions: TXT / Markdown section splitting, heading extraction. PDF text extraction is delayed optional support.
+## text_parser.py
+Purpose: normalize pasted text and register a text `SourceManifestEntry`.
+Input: pasted text + semantic category.
+Output: one `SourceManifestEntry`.
+It does not yet derive text Evidence Objects.
 
-## utils.py *(Task 3)*
-Purpose: shared helpers only — timestamp formatting, JSON serialization, run log persistence (`outputs/run_logs/`). No identity generation, no business logic.
+## context_evidence.py *(Task 5B)*
+Purpose: deterministically convert approved text/form context into bounded `TextEvidenceCandidate` records.
 
-## data_parser.py *(Task 4)*
-Purpose: parse CSV bytes from a `SourceManifestEntry` into a validated pandas DataFrame.
-Input: `SourceManifestEntry` + raw CSV bytes.
-Output: `DataFrame`.
-Failure cases: malformed CSV, wrong encoding, empty DataFrame.
+Input contract:
 
-## data_health.py *(Task 4)*
-Purpose: compute deterministic health metrics from a `DataFrame`; emit `DataHealthSummary` and `list[HealthFindingCandidate]`. Does **not** mint `evidence_id`.
-Input: `SourceManifestEntry` + `DataFrame`.
-Output: `DataHealthSummary` + `list[HealthFindingCandidate]`.
-Key fields computed: `row_count`, `column_count`, `missing_value_rates`, `duplicate_row_count`, `outlier_flags`, `schema_issues`. `readiness_score` is deferred until a defensible scoring method is approved.
-Failure cases: all-null DataFrame raises structured error; empty input is valid (returns empty candidate list).
-Note: `HealthFindingCandidate` objects carry no `evidence_id`. Minting is solely `evidence_builder.py`'s responsibility.
+```text
+raw_text
+semantic_context_category
+field_name
+timezone-aware created_at
+```
 
-## evidence_builder.py *(Task 5)*
-Purpose: convert validated `HealthFindingCandidate` objects into `EvidenceObject` records; mint all `evidence_id` values; detect and handle duplicates and collisions. **The only module that mints `evidence_id`.**
-Input: `list[HealthFindingCandidate]` + `list[SourceManifestEntry]`.
-Output: `list[EvidenceObject]`.
-Duplicate handling: same identity inputs → existing `evidence_id` returned; no second object created.
-Collision handling: short ID match with different `identity_digest` → `IdentityCollisionError`.
-Empty input: valid; returns empty list.
+Behavior:
 
-## role_engine.py *(later)*
-Purpose: load `role_policy.json` at runtime; filter admissible evidence per role; generate `RoleView` records citing `evidence_id` values. Enforces forbidden inputs and required warnings.
-Failure cases: role receives no admissible evidence (must flag `missing_information`); forbidden input consumed by role.
+- industry context → one candidate per nonblank normalized paragraph;
+- strategy profile → one candidate per structured field;
+- user assumption → one candidate per structured field;
+- business question / decision goal → manifest/context result with zero candidates;
+- no LLM, summarization, or inferred business finding.
 
-## risk_checker.py *(later)*
-Purpose: identify weak assumptions, unsupported claims, and interpretation risks; produce `RiskResult` records citing `evidence_id` values. Must run before `workflow_planner.py`. Enforces that `external_context` evidence is not cited as direct company-specific proof.
-Critical risks and unmet prerequisites block or qualify affected execution actions; planner receives structured risk output, not a global stop.
+Failure cases:
 
-## workflow_planner.py *(later)*
-Purpose: generate cross-role action sequence as `WorkflowStep` records citing `evidence_id` values. Downstream of `risk_checker.py`.
-Failure cases: blocked prerequisites, circular dependency.
+- blank text or field name;
+- unsupported category;
+- category/format/locator mismatch;
+- imprecise locator;
+- uncontrolled identity key;
+- missing limitation or invalid canonical role key.
 
-## memo_generator.py *(later)*
-Purpose: post-human-review; generate final `DecisionMemo` citing `evidence_id` values. Runs after human review actions are recorded.
-Failure cases: no human review action recorded; missing evidence references.
+## data_parser.py
+Purpose: parse validated CSV bytes into a pandas DataFrame.
+Failure cases: malformed CSV, wrong encoding, empty/all-null conditions according to approved parser behavior.
 
-## main.py *(later — after backend pipeline is testable)*
-Purpose: Streamlit app entry point. Renders all six UI tabs: Intake, Data Health, Evidence Board, RoleLens Views, Workflow Plan, Decision Memo.
-Input: uploaded files and user context.
-Output: rendered UI.
-Failure cases: missing file, invalid file type, invalid LLM response.
-Note: `app/main.py` is required within the first complete V1 vertical slice and competition demo. It must not be built before the backend evidence pipeline is independently testable.
+## data_health.py
+Purpose: compute deterministic data-health metrics and emit `DataHealthSummary` plus `HealthFindingCandidate` records.
+Does not compute IDs or construct Evidence Objects.
 
-# 5. Suggested UI Tabs
+## evidence_builder.py
+Purpose: convert an explicit union of approved candidate types into `EvidenceObject` records.
+
+Task 5B accepted input:
+
+```text
+HealthFindingCandidate | TextEvidenceCandidate
+```
+
+Responsibilities:
+
+- validate candidate ↔ manifest provenance;
+- derive EvidenceScope from manifest provenance;
+- canonicalize identity inputs;
+- call identity.py for deterministic ID computation;
+- deduplicate exact identities;
+- reject short-ID collisions;
+- construct EvidenceObject records.
+
+No other module constructs EvidenceObject records from candidates.
+
+## role_engine.py *(Task 6A)*
+Purpose:
+
+- load and validate exactly five roles from `config/role_policy.json`;
+- project only allowed inputs to each role;
+- expose only active, relevant evidence;
+- call a provider-neutral `RoleViewProvider`;
+- accept only a mapping or plain JSON object string;
+- perform strict Pydantic validation;
+- validate role key and claim-level evidence references;
+- return valid RoleView records or typed failures.
+
+No regex recovery, Markdown-fence stripping, trailing-prose repair, or silent mock substitution.
+
+Project Manager behavior:
+
+- generated after required non-PM role views;
+- may cite only the exact union of upstream cited evidence IDs;
+- any required upstream role failure returns `UpstreamRoleFailure` for PM.
+
+The five-call design remains provisional pending Task 6B measurements.
+
+## Live Provider Adapter *(Task 6B)*
+Purpose: implement one runtime provider behind the provider-neutral interface.
+
+Required decisions:
+
+- provider/model;
+- credentials;
+- timeouts and retry count;
+- token/output limits;
+- temperature;
+- sanitized metadata logging;
+- live latency and cost;
+- rate-limit behavior;
+- explicit live failure versus visibly labeled offline mode.
+
+The adapter must not contain role-policy, citation-validation, or EvidenceObject construction logic.
+
+## risk_checker.py *(Task 7)*
+Purpose: identify unsupported claims, scope misuse, assumptions represented as facts, correlation/causation errors, role overreach, and missing prerequisites.
+
+A valid evidence reference does not prove semantic entailment. Task 7 and human review remain responsible for semantic misuse.
+
+## workflow_planner.py *(Task 8)*
+Purpose: produce ordered, evidence-citing `WorkflowStep` records after structured risk output exists.
+Failure cases: blocked prerequisites, unresolved dependencies, circular sequence.
+
+## memo_generator.py *(Task 9)*
+Purpose: generate a post-review DecisionMemo from validated evidence, role views, risks, workflow steps, and recorded human actions.
+Failure cases: missing review state, invalid references, unsupported final recommendation.
+
+## main.py *(Task 10)*
+Purpose: Streamlit evaluator path.
+
+Suggested tabs:
+
 1. Intake
 2. Data Health
 3. Evidence Board
@@ -311,11 +473,22 @@ Note: `app/main.py` is required within the first complete V1 vertical slice and 
 5. Workflow Plan
 6. Decision Memo
 
-# 6. Technical Guardrails
-- Use Pydantic for structured outputs.
-- Do not rely on free-form LLM text only.
-- Every role view must include evidence.
-- Every recommendation must include risk or assumption.
-- LLM output must be validated before rendering.
-- If confidence is low, system must say so.
-- Do not over-automate; keep human review visible.
+The UI must visibly distinguish internal observations, external context, stated priorities, assumptions, and decision context.
+
+# 5. Technical Guardrails
+
+- Use frozen, extra-forbidden Pydantic models for production contracts.
+- Do not rely on free-form LLM text.
+- Every `GroundedFinding` cites one or more unique, active, exposed Evidence Objects.
+- View-level citations alone are insufficient.
+- No admissible evidence returns typed `InsufficientEvidence`, not a generic role card.
+- A non-null next action requires at least one grounded finding; it does not automatically require a risk or assumption.
+- External context is never direct company proof.
+- Stated priorities are intent, not performance.
+- Assumptions remain unverified.
+- `relevant_roles` is a routing hint, not an admissibility grant.
+- Invalid provider output never renders.
+- Mock/offline mode is visibly labeled and never silently replaces live failure.
+- Do not overstate deterministic enforcement of natural-language role-policy rules.
+- Do not introduce LangGraph, CrewAI, MCP, vector storage, or complex agent infrastructure in V1.
+- Keep human review visible and required before the final memo.
