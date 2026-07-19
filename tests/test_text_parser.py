@@ -96,13 +96,40 @@ class TestParsePastedText:
         )
         assert result.filename is None
 
-    def test_upload_event_id_is_none(self):
+    def test_upload_event_id_defaults_to_none(self):
         result = parse_pasted_text(
             _SAMPLE_TEXT,
             semantic_context_category=SemanticContextCategory.industry_context,
             created_at=_FIXED_DT,
         )
         assert result.upload_event_id is None
+
+    def test_upload_event_id_stored_as_metadata(self):
+        """upload_event_id is stored in the manifest when supplied."""
+        result = parse_pasted_text(
+            _SAMPLE_TEXT,
+            semantic_context_category=SemanticContextCategory.industry_context,
+            upload_event_id="evt-text-42",
+            created_at=_FIXED_DT,
+        )
+        assert result.upload_event_id == "evt-text-42"
+
+    def test_upload_event_id_does_not_affect_source_id(self):
+        """upload_event_id is excluded from identity; source_id must be stable."""
+        r1 = parse_pasted_text(
+            _SAMPLE_TEXT,
+            semantic_context_category=SemanticContextCategory.industry_context,
+            upload_event_id=None,
+            created_at=_FIXED_DT,
+        )
+        r2 = parse_pasted_text(
+            _SAMPLE_TEXT,
+            semantic_context_category=SemanticContextCategory.industry_context,
+            upload_event_id="evt-different",
+            created_at=_FIXED_DT,
+        )
+        assert r1.source_id == r2.source_id
+        assert r1.identity_digest == r2.identity_digest
 
     # --- Format variants ---
 

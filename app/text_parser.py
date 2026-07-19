@@ -63,6 +63,7 @@ def parse_pasted_text(
     *,
     semantic_context_category: SemanticContextCategory,
     source_format: SourceFormat = SourceFormat.pasted_text,
+    upload_event_id: str | None = None,
     id_algo_version: str = "v1",
     created_at: datetime | None = None,
     identity_registry: Mapping[str, str] | None = None,
@@ -79,6 +80,8 @@ def parse_pasted_text(
         source_format:             Physical format.  Must be one of
                                    pasted_text, txt, or markdown.
                                    Defaults to pasted_text.
+        upload_event_id:           Optional upload event identifier (metadata
+                                   only; excluded from identity).
         id_algo_version:           Identity algorithm version.  Default "v1".
         created_at:                Timezone-aware datetime for the manifest entry.
                                    Defaults to utc_now() if not provided.
@@ -135,7 +138,7 @@ def parse_pasted_text(
         semantic_context_category=semantic_context_category,
         source_scope=source_scope,
         filename=None,
-        upload_event_id=None,
+        upload_event_id=upload_event_id,
         id_algo_version=id_algo_version,
         created_at=ts,
     )
