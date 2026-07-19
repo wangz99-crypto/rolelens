@@ -1,5 +1,5 @@
 """
-app/schemas.py — RoleLens core identity and provenance schemas (Task 1).
+app/schemas.py — RoleLens core identity and provenance schemas (Task 1 / Task 5B-1).
 
 Defines all Pydantic v2 models for:
   - Enums: SourceFormat, SemanticContextCategory, SourceScope,
@@ -10,12 +10,14 @@ Defines all Pydantic v2 models for:
   - EvidenceObject
   - EvidenceReference
   - HealthFindingCandidate
+  - TextEvidenceCandidate  (Task 5B-1)
 
 ID generation and hashing belong in app/identity.py (Task 2).
 This module validates ID format and digest format only.
 
 Architecture invariants enforced here:
   - HealthFindingCandidate has no evidence_id field (minting boundary).
+  - TextEvidenceCandidate has no evidence_id or identity_digest (minting boundary).
   - EvidenceStatus contains only "active" and "invalidated".
   - Cross-object reference existence is NOT validated here.
   - All models use extra="forbid" and frozen=True.
@@ -974,3 +976,258 @@ class DataHealthSummary(ContractModel):
                     f"missing_value_rates[{col!r}] must be a float in [0.0, 1.0], got {rate!r}"
                 )
         return v
+
+
+# ---------------------------------------------------------------------------
+# Task 5B-1 — TextEvidenceCandidate
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Locked identity values per semantic category for TextEvidenceCandidate.
+# These are fixed by spec and enforced by the model_validator below.
+# ---------------------------------------------------------------------------
+
+#: Categories that TextEvidenceCandidate accepts.
+_TEXT_CANDIDATE_CATEGORIES: frozenset[SemanticContextCategory] = frozenset({
+    SemanticContextCategory.industry_context,
+    SemanticContextCategory.strategy_profile,
+    SemanticContextCategory.user_assumption,
+})
+
+#: Permitted machine-level role keys for TextEvidenceCandidate.relevant_roles.
+_PERMITTED_ROLE_KEYS: frozenset[str] = frozenset({
+    "executive",
+    "data_analyst",
+    "data_engineer",
+    "sales_marketing",
+    "project_manager",
+})
+
+#: Locked evidence_type per category.
+_LOCKED_EVIDENCE_TYPE: dict[SemanticContextCategory, str] = {
+    SemanticContextCategory.industry_context: "industry_context_statement",
+    SemanticContextCategory.strategy_profile: "strategy_priority_statement",
+    SemanticContextCategory.user_assumption: "user_assumption_statement",
+}
+
+#: Locked normalized_claim_key per category.
+_LOCKED_CLAIM_KEY: dict[SemanticContextCategory, str] = {
+    SemanticContextCategory.industry_context: "context.industry_context.paragraph",
+    SemanticContextCategory.strategy_profile: "context.strategy_profile.statement",
+    SemanticContextCategory.user_assumption: "context.user_assumption.statement",
+}
+
+#: The only permitted extraction policy version.
+_LOCKED_EXTRACTION_POLICY: str = "exact_source_statement_v1"
+
+
+class TextEvidenceCandidate(ContractModel):
+    """A bounded, deterministic evidence candidate derived from exact user-provided text.
+
+    Represents evidence grounded in industry context, strategy profile statements,
+    or user assumptions.  The semantic category determines and locks the
+    evidence_type, normalized_claim_key, and canonical_rule_parameters values.
+
+    This model intentionally has NO evidence_id or identity_digest field.
+    Those are minted exclusively by app/evidence_builder.py when converting
+    this candidate into an EvidenceObject.
+
+    The later evidence builder sets finding = exact_excerpt and
+    supporting_evidence = exact_excerpt.
+
+    Supported semantic_context_category values:
+      - industry_context   (pasted_text / txt / markdown + TextSourceLocator)
+      - strategy_profile   (form_input + UserContextLocator)
+      - user_assumption    (form_input + UserContextLocator)
+
+    Rejected categories:
+      - business_question, decision_goal, data_source, internal_report
+
+    relevant_roles must contain only the following machine keys (no display names):
+      executive, data_analyst, data_engineer, sales_marketing, project_manager
+    """
+
+    source_id: str = Field(..., description="source_id of the originating source")
+    source_format: SourceFormat = Field(
+        ..., description="Physical format of the originating source"
+    )
+    source_locator: SourceLocator = Field(
+        ..., description="Typed locator pointing to the evidence span within the source"
+    )
+    semantic_context_category: SemanticContextCategory = Field(
+        ..., description="Semantic category; must be industry_context, strategy_profile, or user_assumption"
+    )
+    evidence_type: str = Field(
+        ..., description="Locked evidence type for this category"
+    )
+    canonical_rule_parameters: dict[str, Any] = Field(
+        ..., description="Locked extraction-policy parameters for this category"
+    )
+    normalized_claim_key: str = Field(
+        ..., description="Locked claim key for this category"
+    )
+    exact_excerpt: str = Field(
+        ..., description="Verbatim text excerpt (preserved without rewriting)"
+    )
+    confidence: Literal["low", "medium", "high"] = Field(
+        ..., description="Confidence level for this evidence"
+    )
+    limitations: list[str] = Field(
+        ..., description="Non-empty list of unique, non-blank limitation statements"
+    )
+    relevant_roles: list[str] = Field(
+        ..., description="Non-empty unique list of permitted machine role keys"
+    )
+    decision_relevance: str = Field(
+        ..., description="How this evidence impacts the business decision (non-blank)"
+    )
+
+    # ---- field validators ----
+
+    @field_validator("source_id")
+    @classmethod
+    def source_id_format(cls, v: str) -> str:
+        return _validate_source_id(v)
+
+    @field_validator("exact_excerpt")
+    @classmethod
+    def exact_excerpt_non_blank(cls, v: str) -> str:
+        """exact_excerpt must not be blank or whitespace-only."""
+        if not v or not v.strip():
+            raise ValueError("exact_excerpt must not be blank or whitespace-only")
+        return v
+
+    @field_validator("limitations")
+    @classmethod
+    def limitations_valid(cls, v: list[str]) -> list[str]:
+        """limitations must be non-empty; no blank values; all unique."""
+        if not v:
+            raise ValueError("limitations must contain at least one value")
+        blank = [x for x in v if not x or not x.strip()]
+        if blank:
+            raise ValueError("limitations must not contain blank values")
+        if len(v) != len(set(v)):
+            raise ValueError("limitations must be unique; duplicate values are not allowed")
+        return v
+
+    @field_validator("relevant_roles")
+    @classmethod
+    def relevant_roles_valid(cls, v: list[str]) -> list[str]:
+        """relevant_roles must be non-empty, contain only permitted machine keys, no duplicates."""
+        if not v:
+            raise ValueError("relevant_roles must not be empty")
+        unknown = [r for r in v if r not in _PERMITTED_ROLE_KEYS]
+        if unknown:
+            raise ValueError(
+                f"relevant_roles contains unknown role keys: {unknown!r}. "
+                f"Permitted keys: {sorted(_PERMITTED_ROLE_KEYS)!r}"
+            )
+        if len(v) != len(set(v)):
+            raise ValueError("relevant_roles must not contain duplicate role keys")
+        return v
+
+    @field_validator("decision_relevance")
+    @classmethod
+    def decision_relevance_non_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("decision_relevance must not be blank")
+        return v
+
+    # ---- cross-field model validators ----
+
+    @model_validator(mode="after")
+    def category_allowed(self) -> "TextEvidenceCandidate":
+        """semantic_context_category must be one of the three permitted categories."""
+        if self.semantic_context_category not in _TEXT_CANDIDATE_CATEGORIES:
+            raise ValueError(
+                f"TextEvidenceCandidate does not accept "
+                f"semantic_context_category={self.semantic_context_category.value!r}. "
+                f"Permitted: {[c.value for c in sorted(_TEXT_CANDIDATE_CATEGORIES, key=lambda c: c.value)]!r}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def locked_identity_values(self) -> "TextEvidenceCandidate":
+        """evidence_type, normalized_claim_key, and canonical_rule_parameters
+        must match the locked values for the given semantic_context_category.
+        """
+        cat = self.semantic_context_category
+        if cat not in _TEXT_CANDIDATE_CATEGORIES:
+            # category_allowed validator will surface the primary error.
+            return self
+
+        # Validate evidence_type
+        expected_et = _LOCKED_EVIDENCE_TYPE[cat]
+        if self.evidence_type != expected_et:
+            raise ValueError(
+                f"For semantic_context_category={cat.value!r}, "
+                f"evidence_type must be {expected_et!r}, got {self.evidence_type!r}"
+            )
+
+        # Validate normalized_claim_key
+        expected_ck = _LOCKED_CLAIM_KEY[cat]
+        if self.normalized_claim_key != expected_ck:
+            raise ValueError(
+                f"For semantic_context_category={cat.value!r}, "
+                f"normalized_claim_key must be {expected_ck!r}, "
+                f"got {self.normalized_claim_key!r}"
+            )
+
+        # Validate canonical_rule_parameters
+        expected_params = {
+            "extraction_policy": _LOCKED_EXTRACTION_POLICY,
+            "semantic_context_category": cat.value,
+        }
+        if self.canonical_rule_parameters != expected_params:
+            raise ValueError(
+                f"For semantic_context_category={cat.value!r}, "
+                f"canonical_rule_parameters must be exactly "
+                f"{expected_params!r}, got {self.canonical_rule_parameters!r}"
+            )
+
+        return self
+
+    @model_validator(mode="after")
+    def format_and_locator_compatible(self) -> "TextEvidenceCandidate":
+        """source_format and source_locator must be compatible.
+
+        industry_context: pasted_text, txt, or markdown + TextSourceLocator
+        strategy_profile: form_input + UserContextLocator
+        user_assumption:  form_input + UserContextLocator
+        """
+        cat = self.semantic_context_category
+        fmt = self.source_format
+        loc = self.source_locator
+
+        if cat == SemanticContextCategory.industry_context:
+            allowed_formats = {SourceFormat.pasted_text, SourceFormat.txt, SourceFormat.markdown}
+            if fmt not in allowed_formats:
+                raise ValueError(
+                    f"industry_context requires source_format in "
+                    f"{[f.value for f in sorted(allowed_formats, key=lambda f: f.value)]!r}, "
+                    f"got {fmt.value!r}"
+                )
+            if not isinstance(loc, TextSourceLocator):
+                raise ValueError(
+                    f"industry_context requires TextSourceLocator, "
+                    f"got {type(loc).__name__}"
+                )
+        elif cat in (SemanticContextCategory.strategy_profile, SemanticContextCategory.user_assumption):
+            if fmt != SourceFormat.form_input:
+                raise ValueError(
+                    f"{cat.value!r} requires source_format='form_input', got {fmt.value!r}"
+                )
+            if not isinstance(loc, UserContextLocator):
+                raise ValueError(
+                    f"{cat.value!r} requires UserContextLocator, "
+                    f"got {type(loc).__name__}"
+                )
+            # context_category on the locator must match semantic_context_category
+            if loc.context_category != cat:
+                raise ValueError(
+                    f"UserContextLocator.context_category must equal "
+                    f"semantic_context_category={cat.value!r}, "
+                    f"got context_category={loc.context_category.value!r}"
+                )
+
+        return self

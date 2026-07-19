@@ -55,8 +55,12 @@ from app.schemas import (
     SourceManifestEntry,
     SourceScope,
     TabularSourceLocator,
+    TextEvidenceCandidate,
     TextSourceLocator,
     UserContextLocator,
+    _LOCKED_CLAIM_KEY,
+    _LOCKED_EVIDENCE_TYPE,
+    _LOCKED_EXTRACTION_POLICY,
 )
 
 # ---------------------------------------------------------------------------
@@ -1514,3 +1518,369 @@ class TestTextRangeCompleteness:
     def test_char_end_without_char_start_but_with_heading_rejected(self):
         with pytest.raises(ValidationError, match="char_end requires char_start"):
             TextSourceLocator(char_end=100, heading_path="## Intro")
+
+
+# ---------------------------------------------------------------------------
+# Task 5B-1 — TextEvidenceCandidate tests (requirements 1–19)
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Shared helpers for TextEvidenceCandidate
+# ---------------------------------------------------------------------------
+
+_TC_SOURCE_ID = "src-ptxt-0123456789ab"
+_TC_STRATEGY_SOURCE_ID = "src-form-0123456789ab"
+
+
+def _user_context_locator_for(cat: SemanticContextCategory) -> UserContextLocator:
+    return UserContextLocator(
+        field_name="primary_input",
+        context_category=cat,
+    )
+
+
+def _valid_industry_candidate(**overrides) -> dict:
+    base = dict(
+        source_id=_TC_SOURCE_ID,
+        source_format=SourceFormat.pasted_text,
+        source_locator=TextSourceLocator(paragraph_index=0),
+        semantic_context_category=SemanticContextCategory.industry_context,
+        evidence_type=_LOCKED_EVIDENCE_TYPE[SemanticContextCategory.industry_context],
+        canonical_rule_parameters={
+            "extraction_policy": _LOCKED_EXTRACTION_POLICY,
+            "semantic_context_category": "industry_context",
+        },
+        normalized_claim_key=_LOCKED_CLAIM_KEY[SemanticContextCategory.industry_context],
+        exact_excerpt="The SaaS market is growing at 15% annually.",
+        confidence="high",
+        limitations=["Based on publicly available industry data; may lag reality by 6–12 months."],
+        relevant_roles=["executive", "sales_marketing"],
+        decision_relevance="Contextualises market opportunity for the go-to-market decision.",
+    )
+    base.update(overrides)
+    return base
+
+
+def _valid_strategy_candidate(**overrides) -> dict:
+    base = dict(
+        source_id=_TC_STRATEGY_SOURCE_ID,
+        source_format=SourceFormat.form_input,
+        source_locator=_user_context_locator_for(SemanticContextCategory.strategy_profile),
+        semantic_context_category=SemanticContextCategory.strategy_profile,
+        evidence_type=_LOCKED_EVIDENCE_TYPE[SemanticContextCategory.strategy_profile],
+        canonical_rule_parameters={
+            "extraction_policy": _LOCKED_EXTRACTION_POLICY,
+            "semantic_context_category": "strategy_profile",
+        },
+        normalized_claim_key=_LOCKED_CLAIM_KEY[SemanticContextCategory.strategy_profile],
+        exact_excerpt="Our priority is to reduce churn in the enterprise segment.",
+        confidence="medium",
+        limitations=["User-stated priority; not validated against board minutes."],
+        relevant_roles=["executive", "project_manager"],
+        decision_relevance="Defines the strategic priority that shapes the decision criteria.",
+    )
+    base.update(overrides)
+    return base
+
+
+def _valid_assumption_candidate(**overrides) -> dict:
+    base = dict(
+        source_id=_TC_STRATEGY_SOURCE_ID,
+        source_format=SourceFormat.form_input,
+        source_locator=_user_context_locator_for(SemanticContextCategory.user_assumption),
+        semantic_context_category=SemanticContextCategory.user_assumption,
+        evidence_type=_LOCKED_EVIDENCE_TYPE[SemanticContextCategory.user_assumption],
+        canonical_rule_parameters={
+            "extraction_policy": _LOCKED_EXTRACTION_POLICY,
+            "semantic_context_category": "user_assumption",
+        },
+        normalized_claim_key=_LOCKED_CLAIM_KEY[SemanticContextCategory.user_assumption],
+        exact_excerpt="We assume customers value speed over price.",
+        confidence="low",
+        limitations=["Unvalidated assumption; no customer survey data available."],
+        relevant_roles=["data_analyst", "sales_marketing"],
+        decision_relevance="An unvalidated assumption that must be flagged in the risk assessment.",
+    )
+    base.update(overrides)
+    return base
+
+
+class TestTextEvidenceCandidate:
+    """Tests 1–19 for TextEvidenceCandidate (Task 5B-1 requirement 6)."""
+
+    # -----------------------------------------------------------------------
+    # 1. Valid industry_context candidate
+    # -----------------------------------------------------------------------
+
+    def test_valid_industry_context_candidate(self):
+        c = TextEvidenceCandidate(**_valid_industry_candidate())
+        assert c.semantic_context_category == SemanticContextCategory.industry_context
+        assert c.source_format == SourceFormat.pasted_text
+        assert isinstance(c.source_locator, TextSourceLocator)
+        assert c.evidence_type == "industry_context_statement"
+        assert c.normalized_claim_key == "context.industry_context.paragraph"
+        assert c.canonical_rule_parameters == {
+            "extraction_policy": "exact_source_statement_v1",
+            "semantic_context_category": "industry_context",
+        }
+
+    # -----------------------------------------------------------------------
+    # 2. Valid strategy_profile candidate
+    # -----------------------------------------------------------------------
+
+    def test_valid_strategy_profile_candidate(self):
+        c = TextEvidenceCandidate(**_valid_strategy_candidate())
+        assert c.semantic_context_category == SemanticContextCategory.strategy_profile
+        assert c.source_format == SourceFormat.form_input
+        assert isinstance(c.source_locator, UserContextLocator)
+        assert c.evidence_type == "strategy_priority_statement"
+        assert c.normalized_claim_key == "context.strategy_profile.statement"
+
+    # -----------------------------------------------------------------------
+    # 3. Valid user_assumption candidate
+    # -----------------------------------------------------------------------
+
+    def test_valid_user_assumption_candidate(self):
+        c = TextEvidenceCandidate(**_valid_assumption_candidate())
+        assert c.semantic_context_category == SemanticContextCategory.user_assumption
+        assert c.source_format == SourceFormat.form_input
+        assert isinstance(c.source_locator, UserContextLocator)
+        assert c.evidence_type == "user_assumption_statement"
+        assert c.normalized_claim_key == "context.user_assumption.statement"
+
+    # -----------------------------------------------------------------------
+    # 4. business_question rejected
+    # -----------------------------------------------------------------------
+
+    def test_business_question_rejected(self):
+        with pytest.raises(ValidationError, match="business_question"):
+            TextEvidenceCandidate(**_valid_industry_candidate(
+                semantic_context_category=SemanticContextCategory.business_question,
+                # The locked-value checks will also fail for this category, but the
+                # category_allowed validator surfaces the primary error.
+                evidence_type="industry_context_statement",
+                normalized_claim_key="context.industry_context.paragraph",
+                canonical_rule_parameters={
+                    "extraction_policy": "exact_source_statement_v1",
+                    "semantic_context_category": "business_question",
+                },
+            ))
+
+    # -----------------------------------------------------------------------
+    # 5. decision_goal rejected
+    # -----------------------------------------------------------------------
+
+    def test_decision_goal_rejected(self):
+        with pytest.raises(ValidationError, match="decision_goal"):
+            TextEvidenceCandidate(**_valid_industry_candidate(
+                semantic_context_category=SemanticContextCategory.decision_goal,
+                evidence_type="industry_context_statement",
+                normalized_claim_key="context.industry_context.paragraph",
+                canonical_rule_parameters={
+                    "extraction_policy": "exact_source_statement_v1",
+                    "semantic_context_category": "decision_goal",
+                },
+            ))
+
+    # -----------------------------------------------------------------------
+    # 6. Category and locator type mismatch rejected
+    # -----------------------------------------------------------------------
+
+    def test_industry_context_with_user_context_locator_rejected(self):
+        """industry_context requires TextSourceLocator, not UserContextLocator."""
+        with pytest.raises(ValidationError, match="TextSourceLocator"):
+            TextEvidenceCandidate(**_valid_industry_candidate(
+                source_format=SourceFormat.pasted_text,
+                source_locator=_user_context_locator_for(SemanticContextCategory.industry_context),
+            ))
+
+    def test_strategy_profile_with_text_locator_rejected(self):
+        """strategy_profile requires UserContextLocator, not TextSourceLocator."""
+        with pytest.raises(ValidationError, match="UserContextLocator"):
+            TextEvidenceCandidate(**_valid_strategy_candidate(
+                source_format=SourceFormat.form_input,
+                source_locator=TextSourceLocator(paragraph_index=0),
+            ))
+
+    def test_industry_context_with_csv_format_rejected(self):
+        """industry_context requires pasted_text, txt, or markdown format."""
+        with pytest.raises(ValidationError):
+            TextEvidenceCandidate(**_valid_industry_candidate(
+                source_format=SourceFormat.csv,
+                source_locator=TextSourceLocator(paragraph_index=0),
+            ))
+
+    # -----------------------------------------------------------------------
+    # 7. UserContextLocator category mismatch rejected
+    # -----------------------------------------------------------------------
+
+    def test_user_context_locator_category_mismatch_rejected(self):
+        """UserContextLocator.context_category must match semantic_context_category."""
+        mismatched_locator = UserContextLocator(
+            field_name="strategy_field",
+            context_category=SemanticContextCategory.user_assumption,  # wrong
+        )
+        with pytest.raises(ValidationError, match="context_category"):
+            TextEvidenceCandidate(**_valid_strategy_candidate(
+                source_locator=mismatched_locator,
+            ))
+
+    # -----------------------------------------------------------------------
+    # 8. Arbitrary evidence_type rejected
+    # -----------------------------------------------------------------------
+
+    def test_arbitrary_evidence_type_rejected(self):
+        with pytest.raises(ValidationError, match="evidence_type"):
+            TextEvidenceCandidate(**_valid_industry_candidate(
+                evidence_type="custom_type",
+            ))
+
+    # -----------------------------------------------------------------------
+    # 9. Arbitrary normalized_claim_key rejected
+    # -----------------------------------------------------------------------
+
+    def test_arbitrary_normalized_claim_key_rejected(self):
+        with pytest.raises(ValidationError, match="normalized_claim_key"):
+            TextEvidenceCandidate(**_valid_industry_candidate(
+                normalized_claim_key="custom.claim.key",
+            ))
+
+    # -----------------------------------------------------------------------
+    # 10. Wrong extraction_policy rejected
+    # -----------------------------------------------------------------------
+
+    def test_wrong_extraction_policy_rejected(self):
+        with pytest.raises(ValidationError, match="canonical_rule_parameters"):
+            TextEvidenceCandidate(**_valid_industry_candidate(
+                canonical_rule_parameters={
+                    "extraction_policy": "wrong_policy_v99",
+                    "semantic_context_category": "industry_context",
+                },
+            ))
+
+    # -----------------------------------------------------------------------
+    # 11. Extra canonical_rule_parameters rejected
+    # -----------------------------------------------------------------------
+
+    def test_extra_rule_parameters_rejected(self):
+        with pytest.raises(ValidationError, match="canonical_rule_parameters"):
+            TextEvidenceCandidate(**_valid_industry_candidate(
+                canonical_rule_parameters={
+                    "extraction_policy": "exact_source_statement_v1",
+                    "semantic_context_category": "industry_context",
+                    "extra_param": "should_not_be_here",
+                },
+            ))
+
+    # -----------------------------------------------------------------------
+    # 12. Blank exact_excerpt rejected
+    # -----------------------------------------------------------------------
+
+    def test_blank_exact_excerpt_rejected(self):
+        with pytest.raises(ValidationError, match="exact_excerpt"):
+            TextEvidenceCandidate(**_valid_industry_candidate(exact_excerpt=""))
+
+    def test_whitespace_exact_excerpt_rejected(self):
+        with pytest.raises(ValidationError, match="exact_excerpt"):
+            TextEvidenceCandidate(**_valid_industry_candidate(exact_excerpt="   "))
+
+    # -----------------------------------------------------------------------
+    # 13. Empty limitations rejected
+    # -----------------------------------------------------------------------
+
+    def test_empty_limitations_rejected(self):
+        with pytest.raises(ValidationError, match="limitations"):
+            TextEvidenceCandidate(**_valid_industry_candidate(limitations=[]))
+
+    # -----------------------------------------------------------------------
+    # 14. Blank limitation rejected
+    # -----------------------------------------------------------------------
+
+    def test_blank_limitation_rejected(self):
+        with pytest.raises(ValidationError, match="limitations"):
+            TextEvidenceCandidate(**_valid_industry_candidate(
+                limitations=["valid limitation", ""]
+            ))
+
+    def test_whitespace_limitation_rejected(self):
+        with pytest.raises(ValidationError, match="limitations"):
+            TextEvidenceCandidate(**_valid_industry_candidate(
+                limitations=["valid limitation", "   "]
+            ))
+
+    # -----------------------------------------------------------------------
+    # 15. Duplicate limitations rejected
+    # -----------------------------------------------------------------------
+
+    def test_duplicate_limitations_rejected(self):
+        with pytest.raises(ValidationError, match="unique"):
+            TextEvidenceCandidate(**_valid_industry_candidate(
+                limitations=["same limitation text", "same limitation text"],
+            ))
+
+    # -----------------------------------------------------------------------
+    # 16. Unknown display-name role rejected
+    # -----------------------------------------------------------------------
+
+    def test_display_name_role_rejected(self):
+        """'Sales / Marketing' display name must be rejected; only machine keys allowed."""
+        with pytest.raises(ValidationError, match="unknown role keys"):
+            TextEvidenceCandidate(**_valid_industry_candidate(
+                relevant_roles=["Sales / Marketing"],
+            ))
+
+    def test_unknown_role_key_rejected(self):
+        with pytest.raises(ValidationError, match="unknown role keys"):
+            TextEvidenceCandidate(**_valid_industry_candidate(
+                relevant_roles=["executive", "cfo"],
+            ))
+
+    # -----------------------------------------------------------------------
+    # 17. Duplicate machine role rejected
+    # -----------------------------------------------------------------------
+
+    def test_duplicate_role_key_rejected(self):
+        with pytest.raises(ValidationError, match="duplicate"):
+            TextEvidenceCandidate(**_valid_industry_candidate(
+                relevant_roles=["executive", "executive"],
+            ))
+
+    # -----------------------------------------------------------------------
+    # 18. evidence_id and identity_digest extra fields rejected
+    # -----------------------------------------------------------------------
+
+    def test_evidence_id_extra_field_rejected(self):
+        """extra='forbid' must reject evidence_id (minting boundary)."""
+        with pytest.raises(ValidationError):
+            TextEvidenceCandidate(**_valid_industry_candidate(
+                evidence_id="ev-industry_co-0123456789ab",
+            ))
+
+    def test_identity_digest_extra_field_rejected(self):
+        """extra='forbid' must reject identity_digest (minting boundary)."""
+        with pytest.raises(ValidationError):
+            TextEvidenceCandidate(**_valid_industry_candidate(
+                identity_digest="a" * 64,
+            ))
+
+    # -----------------------------------------------------------------------
+    # 19. exact_excerpt preserved without rewriting
+    # -----------------------------------------------------------------------
+
+    def test_exact_excerpt_preserved_without_rewriting(self):
+        """The model must return exact_excerpt verbatim, without any normalization."""
+        raw_text = "  The SaaS market IS Growing at 15%.\t\n  "
+        c = TextEvidenceCandidate(**_valid_industry_candidate(exact_excerpt=raw_text))
+        assert c.exact_excerpt == raw_text, (
+            "exact_excerpt must be preserved exactly as supplied, including whitespace"
+        )
+
+    def test_no_evidence_id_attribute(self):
+        """TextEvidenceCandidate must not have an evidence_id attribute."""
+        c = TextEvidenceCandidate(**_valid_industry_candidate())
+        assert not hasattr(c, "evidence_id")
+
+    def test_no_identity_digest_attribute(self):
+        """TextEvidenceCandidate must not have an identity_digest attribute."""
+        c = TextEvidenceCandidate(**_valid_industry_candidate())
+        assert not hasattr(c, "identity_digest")
