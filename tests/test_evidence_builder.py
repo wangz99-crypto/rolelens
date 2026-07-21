@@ -17,6 +17,7 @@ Coverage targets:
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,11 +27,15 @@ import pytest
 
 from app.data_health import analyze_data_health
 from app.data_parser import parse_csv
+from app.context_evidence import extract_context_evidence
 from app.evidence_builder import (
+    CandidateContractMismatchError,
     ConflictingSourceManifestError,
+    EvidenceCandidate,
     EvidenceScopeError,
     MissingSourceManifestError,
     ProvenanceMismatchError,
+    SemanticContextMismatchError,
     _build_manifest_registry,
     _derive_evidence_scope,
     build_evidence,
@@ -44,9 +49,12 @@ from app.schemas import (
     HealthFindingCandidate,
     SemanticContextCategory,
     SourceFormat,
+    SourceLocator,
     SourceManifestEntry,
     SourceScope,
     TabularSourceLocator,
+    TextEvidenceCandidate,
+    TextSourceLocator,
 )
 
 # ---------------------------------------------------------------------------
@@ -58,6 +66,7 @@ _EVIDENCE_ID_RE = re.compile(r"^ev-[a-z0-9_]{1,12}-[0-9a-f]{12}$")
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 _FIXED_DT = datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 _SAMPLE_CSV_PATH = Path("sample_data") / "regional_sales_q1_q4.csv"
+_SAMPLE_CONTEXT_PATH = Path("sample_data") / "b2b_saas_churn_context.json"
 
 
 def _csv_entry(raw: bytes, category=SemanticContextCategory.data_source) -> SourceManifestEntry:
@@ -874,3 +883,418 @@ class TestEvidenceVersionFromManifest:
         assert ev2[0].id_algo_version == "v1b"
         # Different manifests with different source_ids → different evidence_ids.
         assert ev1[0].evidence_id != ev2[0].evidence_id
+
+
+# ===========================================================================
+# O. Task 5B-3 — text and structured-context evidence minting
+# ===========================================================================
+
+
+class TestTextEvidenceBuilder:
+    """Focused production coverage for the explicit candidate union."""
+
+    def test_text_candidate_mints_exact_excerpt_evidence(self):
+        extraction = extract_context_evidence(
+            "External context: renewal timing can inform churn analysis.",
+            semantic_context_category=SemanticContextCategory.industry_context,
+            field_name="industry_context",
+            created_at=_FIXED_DT,
+        )
+        candidate: EvidenceCandidate = extraction.candidates[0]
+
+        evidence = build_evidence([candidate], [extraction.source_manifest])
+
+        assert len(evidence) == 1
+        assert isinstance(candidate, TextEvidenceCandidate)
+        assert isinstance(evidence[0], EvidenceObject)
+        assert evidence[0].finding == candidate.exact_excerpt
+        assert evidence[0].supporting_evidence == candidate.exact_excerpt
+        assert evidence[0].evidence_type == candidate.evidence_type
+        assert evidence[0].source_locator == candidate.source_locator
+        assert evidence[0].confidence == candidate.confidence
+        assert evidence[0].limitations == candidate.limitations
+        assert evidence[0].relevant_roles == candidate.relevant_roles
+        assert evidence[0].decision_relevance == candidate.decision_relevance
+        assert evidence[0].evidence_scope == EvidenceScope.external_context
+        assert evidence[0].extraction_method == "deterministic"
+        assert evidence[0].created_by == "evidence_builder"
+        assert evidence[0].status == EvidenceStatus.active
+
+    @pytest.mark.parametrize(
+        ("category", "text", "expected_scope"),
+        [
+            (
+                SemanticContextCategory.strategy_profile,
+                "Priority: review evidence before starting a retention pilot.",
+                EvidenceScope.stated_priority,
+            ),
+            (
+                SemanticContextCategory.user_assumption,
+                "Unverified assumption: lower usage may indicate churn risk.",
+                EvidenceScope.assumption,
+            ),
+        ],
+    )
+    def test_structured_context_derives_manifest_scope(
+        self,
+        category: SemanticContextCategory,
+        text: str,
+        expected_scope: EvidenceScope,
+    ):
+        extraction = extract_context_evidence(
+            text,
+            semantic_context_category=category,
+            field_name=category.value,
+            created_at=_FIXED_DT,
+        )
+
+        evidence = build_evidence(
+            extraction.candidates,
+            [extraction.source_manifest],
+        )
+
+        assert [item.evidence_scope for item in evidence] == [expected_scope]
+
+    def test_semantic_context_mismatch_fails_closed(self):
+        extraction = extract_context_evidence(
+            "External context: contract renewal cycles vary by market.",
+            semantic_context_category=SemanticContextCategory.industry_context,
+            field_name="industry_context",
+            created_at=_FIXED_DT,
+        )
+        manifest_data = extraction.source_manifest.model_dump()
+        manifest_data["semantic_context_category"] = (
+            SemanticContextCategory.internal_report
+        )
+        mismatched_manifest = SourceManifestEntry(**manifest_data)
+
+        with pytest.raises(SemanticContextMismatchError) as exc_info:
+            build_evidence(extraction.candidates, [mismatched_manifest])
+
+        assert exc_info.value.source_id == extraction.source_manifest.source_id
+        assert exc_info.value.candidate_category == "industry_context"
+        assert exc_info.value.manifest_category == "internal_report"
+
+    def test_text_candidate_format_mismatch_still_fails(self):
+        extraction = extract_context_evidence(
+            "External context: retention practices differ across SaaS markets.",
+            semantic_context_category=SemanticContextCategory.industry_context,
+            field_name="industry_context",
+            created_at=_FIXED_DT,
+        )
+        manifest_data = extraction.source_manifest.model_dump()
+        manifest_data["source_format"] = SourceFormat.txt
+        mismatched_manifest = SourceManifestEntry(**manifest_data)
+
+        with pytest.raises(ProvenanceMismatchError):
+            build_evidence(extraction.candidates, [mismatched_manifest])
+
+    def test_decision_context_manifest_raises_scope_error(self):
+        decision_context = extract_context_evidence(
+            "Should a limited retention pilot be considered?",
+            semantic_context_category=SemanticContextCategory.business_question,
+            field_name="business_question",
+            created_at=_FIXED_DT,
+        )
+        strategy = extract_context_evidence(
+            "Priority: require human review before any retention pilot.",
+            semantic_context_category=SemanticContextCategory.strategy_profile,
+            field_name="strategy_profile",
+            created_at=_FIXED_DT,
+        )
+        candidate_data = strategy.candidates[0].model_dump()
+        candidate_data["source_id"] = decision_context.source_manifest.source_id
+        candidate = TextEvidenceCandidate(**candidate_data)
+
+        with pytest.raises(EvidenceScopeError) as exc_info:
+            build_evidence([candidate], [decision_context.source_manifest])
+
+        assert exc_info.value.source_id == decision_context.source_manifest.source_id
+
+    def test_exact_duplicate_text_candidate_deduplicates(self):
+        extraction = extract_context_evidence(
+            "External context: renewal timing can inform churn analysis.",
+            semantic_context_category=SemanticContextCategory.industry_context,
+            field_name="industry_context",
+            created_at=_FIXED_DT,
+        )
+        candidate = extraction.candidates[0]
+
+        evidence = build_evidence(
+            [candidate, candidate],
+            [extraction.source_manifest],
+        )
+
+        assert len(evidence) == 1
+
+    def test_identical_excerpts_at_different_locators_remain_distinct(self):
+        extraction = extract_context_evidence(
+            "External context statement.\n\nExternal context statement.",
+            semantic_context_category=SemanticContextCategory.industry_context,
+            field_name="industry_context",
+            created_at=_FIXED_DT,
+        )
+
+        evidence = build_evidence(
+            extraction.candidates,
+            [extraction.source_manifest],
+        )
+
+        assert len(evidence) == 2
+        assert evidence[0].finding == evidence[1].finding
+        assert evidence[0].source_locator != evidence[1].source_locator
+        assert evidence[0].evidence_id != evidence[1].evidence_id
+
+    def test_text_and_health_candidates_share_one_batch(self):
+        csv_manifest = _csv_entry(b"revenue\n100\n100\n")
+        health_candidate = _make_single_candidate(csv_manifest)
+        text_extraction = extract_context_evidence(
+            "External context: renewal timing can inform churn analysis.",
+            semantic_context_category=SemanticContextCategory.industry_context,
+            field_name="industry_context",
+            created_at=_FIXED_DT,
+        )
+
+        evidence = build_evidence(
+            [health_candidate, text_extraction.candidates[0]],
+            [csv_manifest, text_extraction.source_manifest],
+        )
+
+        assert len(evidence) == 2
+        assert {item.source_id for item in evidence} == {
+            csv_manifest.source_id,
+            text_extraction.source_manifest.source_id,
+        }
+
+    def test_mixed_candidate_collision_uses_shared_registry(self):
+        from unittest.mock import patch
+
+        csv_manifest = _csv_entry(b"revenue\n100\n100\n")
+        health_candidate = _make_single_candidate(csv_manifest)
+        text_extraction = extract_context_evidence(
+            "External context: renewal timing can inform churn analysis.",
+            semantic_context_category=SemanticContextCategory.industry_context,
+            field_name="industry_context",
+            created_at=_FIXED_DT,
+        )
+        real_results: list[tuple[str, str]] = []
+
+        def collide_second_identity(**kwargs):
+            from app.identity import generate_evidence_id as real_generate
+
+            generated = real_generate(**kwargs)
+            real_results.append(generated)
+            if len(real_results) == 1:
+                return generated
+            return real_results[0][0], generated[1]
+
+        with patch(
+            "app.evidence_builder.generate_evidence_id",
+            side_effect=collide_second_identity,
+        ):
+            with pytest.raises(IdentityCollisionError):
+                build_evidence(
+                    [health_candidate, text_extraction.candidates[0]],
+                    [csv_manifest, text_extraction.source_manifest],
+                )
+
+    def test_text_evidence_uses_manifest_id_algo_version(self):
+        extraction = extract_context_evidence(
+            "External context: renewal timing can inform churn analysis.",
+            semantic_context_category=SemanticContextCategory.industry_context,
+            field_name="industry_context",
+            created_at=_FIXED_DT,
+        )
+        manifest_data = extraction.source_manifest.model_dump()
+        manifest_data["id_algo_version"] = "v2"
+        v2_manifest = SourceManifestEntry(**manifest_data)
+
+        v1_evidence = build_evidence(
+            extraction.candidates,
+            [extraction.source_manifest],
+        )
+        v2_evidence = build_evidence(extraction.candidates, [v2_manifest])
+
+        assert v2_evidence[0].id_algo_version == "v2"
+        assert v2_evidence[0].evidence_id != v1_evidence[0].evidence_id
+
+    def test_sample_fixture_completes_context_evidence_pipeline(self):
+        source_inputs = json.loads(_SAMPLE_CONTEXT_PATH.read_text(encoding="utf-8"))
+        expected_keys = {
+            "industry_context",
+            "strategy_profile",
+            "user_assumption",
+            "business_question",
+            "decision_goal",
+        }
+        assert set(source_inputs) == expected_keys
+
+        evidence_categories = {
+            SemanticContextCategory.industry_context,
+            SemanticContextCategory.strategy_profile,
+            SemanticContextCategory.user_assumption,
+        }
+        manifests: list[SourceManifestEntry] = []
+        candidates: list[TextEvidenceCandidate] = []
+
+        for category_name, raw_text in source_inputs.items():
+            category = SemanticContextCategory(category_name)
+            extraction = extract_context_evidence(
+                raw_text,
+                semantic_context_category=category,
+                field_name=category_name,
+                created_at=_FIXED_DT,
+            )
+            manifests.append(extraction.source_manifest)
+            if category in evidence_categories:
+                assert len(extraction.candidates) == 1
+                candidates.extend(extraction.candidates)
+            else:
+                assert extraction.candidates == ()
+
+        evidence = build_evidence(candidates, manifests)
+
+        assert len(evidence) == 3
+        assert {item.evidence_scope for item in evidence} == {
+            EvidenceScope.external_context,
+            EvidenceScope.stated_priority,
+            EvidenceScope.assumption,
+        }
+
+    def test_only_evidence_builder_constructs_evidence_objects(self):
+        import ast
+
+        violations: list[str] = []
+        for module_path in Path("app").glob("*.py"):
+            if module_path.name == "evidence_builder.py":
+                continue
+            tree = ast.parse(module_path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                called_name = ""
+                if isinstance(node.func, ast.Name):
+                    called_name = node.func.id
+                elif isinstance(node.func, ast.Attribute):
+                    called_name = node.func.attr
+                if called_name == "EvidenceObject":
+                    violations.append(f"{module_path}:{node.lineno}")
+
+        assert violations == []
+
+
+# ===========================================================================
+# P. Task 5B-3 repair — concrete candidate contract enforcement
+# ===========================================================================
+
+
+class TestCandidateContractEnforcement:
+    """Health candidates must remain on the structured-data evidence path."""
+
+    @staticmethod
+    def _health_candidate(
+        manifest: SourceManifestEntry,
+        source_locator: SourceLocator,
+    ) -> HealthFindingCandidate:
+        return HealthFindingCandidate(
+            source_id=manifest.source_id,
+            source_format=manifest.source_format,
+            source_locator=source_locator,
+            evidence_type="missing_value_rate",
+            canonical_rule_parameters={"threshold": 0.0},
+            normalized_claim_key="data.missing.example",
+            finding="Example health finding.",
+            supporting_evidence="Example health evidence.",
+            confidence="high",
+            limitations=[],
+            relevant_roles=["data_analyst"],
+            decision_relevance="Validates the candidate contract.",
+        )
+
+    def test_health_candidate_with_industry_context_manifest_is_rejected(self):
+        extraction = extract_context_evidence(
+            "Synthetic external context: renewal patterns vary by market.",
+            semantic_context_category=SemanticContextCategory.industry_context,
+            field_name="industry_context",
+            created_at=_FIXED_DT,
+        )
+        candidate = self._health_candidate(
+            extraction.source_manifest,
+            extraction.candidates[0].source_locator,
+        )
+
+        with pytest.raises(CandidateContractMismatchError) as exc_info:
+            build_evidence([candidate], [extraction.source_manifest])
+
+        assert exc_info.value.source_id == extraction.source_manifest.source_id
+        assert exc_info.value.candidate_type == "HealthFindingCandidate"
+        assert (
+            exc_info.value.manifest_semantic_context_category
+            == "industry_context"
+        )
+        assert exc_info.value.manifest_source_format == "pasted_text"
+
+    def test_health_candidate_with_strategy_profile_manifest_is_rejected(self):
+        extraction = extract_context_evidence(
+            "Priority: require evidence review before a retention pilot.",
+            semantic_context_category=SemanticContextCategory.strategy_profile,
+            field_name="strategy_profile",
+            created_at=_FIXED_DT,
+        )
+        candidate = self._health_candidate(
+            extraction.source_manifest,
+            extraction.candidates[0].source_locator,
+        )
+
+        with pytest.raises(CandidateContractMismatchError):
+            build_evidence([candidate], [extraction.source_manifest])
+
+    def test_health_candidate_with_pasted_internal_report_is_rejected(self):
+        from app.identity import generate_source_id
+
+        source_id, digest = generate_source_id(
+            source_format="pasted_text",
+            semantic_context_category="internal_report",
+            normalized_content="Internal report text.",
+        )
+        manifest = SourceManifestEntry(
+            source_id=source_id,
+            identity_digest=digest,
+            source_format=SourceFormat.pasted_text,
+            semantic_context_category=SemanticContextCategory.internal_report,
+            source_scope=SourceScope.internal_observation,
+            created_at=_FIXED_DT,
+        )
+        candidate = self._health_candidate(
+            manifest,
+            TextSourceLocator(line_start=0),
+        )
+
+        with pytest.raises(CandidateContractMismatchError):
+            build_evidence([candidate], [manifest])
+
+    def test_health_candidate_with_csv_data_source_still_succeeds(self):
+        manifest = _csv_entry(b"revenue\n100\n100\n")
+        candidate = _make_single_candidate(manifest)
+
+        evidence = build_evidence([candidate], [manifest])
+
+        assert len(evidence) == 1
+        assert evidence[0].source_id == manifest.source_id
+
+    def test_text_candidate_pipeline_still_succeeds(self):
+        extraction = extract_context_evidence(
+            "Synthetic external demo context: renewal patterns vary by market. "
+            "This is not company-specific evidence.",
+            semantic_context_category=SemanticContextCategory.industry_context,
+            field_name="industry_context",
+            created_at=_FIXED_DT,
+        )
+
+        evidence = build_evidence(
+            extraction.candidates,
+            [extraction.source_manifest],
+        )
+
+        assert len(evidence) == 1
+        assert evidence[0].evidence_scope == EvidenceScope.external_context

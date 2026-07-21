@@ -4,7 +4,7 @@ app/evidence_builder.py — RoleLens Evidence Object builder (Task 5).
 This is the SOLE module permitted to mint evidence_id values.
 
 Responsibilities:
-  - Accept a list[HealthFindingCandidate] and a list[SourceManifestEntry].
+  - Accept a sequence of approved EvidenceCandidate values and source manifests.
   - Build an explicit source manifest registry that detects duplicate and
     conflicting manifest entries (same source_id with incompatible metadata).
   - Validate that each candidate's source_format matches its manifest's
@@ -21,14 +21,14 @@ Responsibilities:
 
 Architecture invariants:
   - No other module may generate evidence_id values.
-  - HealthFindingCandidate has no evidence_id field — this module adds it.
-  - data_health.py produces HealthFindingCandidate; this module produces
-    EvidenceObject.  The boundary is enforced by both schemas.
+  - Candidate schemas have no evidence_id field — this module adds it.
+  - data_health.py and context_evidence.py produce bounded candidates; this
+    module produces EvidenceObject records.  The boundary is schema-enforced.
   - Empty input list is valid and returns an empty list.
   - sources with source_scope == decision_context must not produce EvidenceObjects
     — raise EvidenceScopeError if attempted.
   - identity.py computes deterministic IDs; this module is the only place that
-    constructs EvidenceObject records from HealthFindingCandidate objects.
+    constructs EvidenceObject records from approved candidates.
 
 Decision 002 evidence_scope derivation:
   source_scope=internal_observation → evidence_scope=internal_observation
@@ -39,6 +39,8 @@ Decision 002 evidence_scope derivation:
 """
 
 from __future__ import annotations
+
+from collections.abc import Sequence
 
 from app.identity import (
     IdentityCollisionError,
@@ -53,9 +55,15 @@ from app.schemas import (
     EvidenceStatus,
     HealthFindingCandidate,
     SemanticContextCategory,
+    SourceFormat,
     SourceManifestEntry,
     SourceScope,
+    TextEvidenceCandidate,
 )
+
+
+EvidenceCandidate = HealthFindingCandidate | TextEvidenceCandidate
+"""Explicit union of candidate schemas approved for evidence minting."""
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +146,64 @@ class ProvenanceMismatchError(ValueError):
         )
 
 
+class SemanticContextMismatchError(ValueError):
+    """Raised when a text candidate's category differs from its manifest.
+
+    Attributes:
+        source_id: The source identifier shared by the candidate and manifest.
+        candidate_category: The semantic category declared by the candidate.
+        manifest_category: The semantic category registered by the manifest.
+    """
+
+    def __init__(
+        self,
+        source_id: str,
+        candidate_category: str,
+        manifest_category: str,
+    ) -> None:
+        self.source_id = source_id
+        self.candidate_category = candidate_category
+        self.manifest_category = manifest_category
+        super().__init__(
+            f"Semantic context mismatch for source_id={source_id!r}: "
+            f"candidate.semantic_context_category={candidate_category!r} but "
+            f"manifest.semantic_context_category={manifest_category!r}.  "
+            "Do not construct an EvidenceObject from mismatched provenance."
+        )
+
+
+class CandidateContractMismatchError(ValueError):
+    """Raised when a candidate type is incompatible with its source manifest.
+
+    Attributes:
+        source_id: The source identifier referenced by the candidate.
+        candidate_type: The concrete candidate schema name.
+        manifest_semantic_context_category: The manifest's semantic category.
+        manifest_source_format: The manifest's physical source format.
+    """
+
+    def __init__(
+        self,
+        source_id: str,
+        candidate_type: str,
+        manifest_semantic_context_category: str,
+        manifest_source_format: str,
+    ) -> None:
+        self.source_id = source_id
+        self.candidate_type = candidate_type
+        self.manifest_semantic_context_category = (
+            manifest_semantic_context_category
+        )
+        self.manifest_source_format = manifest_source_format
+        super().__init__(
+            f"Candidate contract mismatch for source_id={source_id!r}: "
+            f"candidate_type={candidate_type!r} cannot mint evidence from "
+            f"manifest.semantic_context_category="
+            f"{manifest_semantic_context_category!r} and "
+            f"manifest.source_format={manifest_source_format!r}."
+        )
+
+
 class ConflictingSourceManifestError(ValueError):
     """Raised when two SourceManifestEntry objects share the same source_id
     and identity_digest but have conflicting identity metadata.
@@ -167,7 +233,7 @@ class ConflictingSourceManifestError(ValueError):
 
 
 def _build_manifest_registry(
-    source_manifests: list[SourceManifestEntry],
+    source_manifests: Sequence[SourceManifestEntry],
 ) -> dict[str, SourceManifestEntry]:
     """Build a source_id → SourceManifestEntry registry from a list of manifests.
 
@@ -286,10 +352,10 @@ def _derive_evidence_scope(
 
 
 def build_evidence(
-    candidates: list[HealthFindingCandidate],
-    source_manifests: list[SourceManifestEntry],
+    candidates: Sequence[EvidenceCandidate],
+    source_manifests: Sequence[SourceManifestEntry],
 ) -> list[EvidenceObject]:
-    """Convert validated HealthFindingCandidate objects into EvidenceObject records.
+    """Convert validated approved candidates into EvidenceObject records.
 
     This is the only function in the codebase permitted to mint evidence_id values.
 
@@ -312,9 +378,9 @@ def build_evidence(
       not an error — a clean dataset produces no health findings.
 
     Args:
-        candidates:       list[HealthFindingCandidate] from data_health.py.
-                          Must not contain evidence_id fields (enforced by schema).
-        source_manifests: list[SourceManifestEntry] providing provenance for
+        candidates:       Sequence of HealthFindingCandidate or TextEvidenceCandidate
+                          values. Must not contain evidence_id fields (schema-enforced).
+        source_manifests: Sequence of SourceManifestEntry values providing provenance for
                           each candidate.  Every candidate's source_id must
                           appear in this list.
 
@@ -324,6 +390,10 @@ def build_evidence(
     Raises:
         MissingSourceManifestError:     If a candidate references an unknown source_id.
         ProvenanceMismatchError:        If candidate.source_format != manifest.source_format.
+        CandidateContractMismatchError: If the concrete candidate schema is not
+                                        permitted for the manifest category and format.
+        SemanticContextMismatchError:   If a text candidate's semantic category differs
+                                        from its manifest's category.
         EvidenceScopeError:             If a source has source_scope=decision_context.
         IdentityCollisionError:         If a short ID collision is detected within
                                         this batch (not in a persistent registry).
@@ -364,6 +434,37 @@ def build_evidence(
                 source_scope=manifest.source_scope.value,
             )
 
+        # --- Enforce the concrete candidate schema's manifest contract ---
+        if isinstance(candidate, HealthFindingCandidate) and (
+            manifest.semantic_context_category
+            not in {
+                SemanticContextCategory.data_source,
+                SemanticContextCategory.internal_report,
+            }
+            or manifest.source_format
+            not in {SourceFormat.csv, SourceFormat.excel}
+        ):
+            raise CandidateContractMismatchError(
+                source_id=candidate.source_id,
+                candidate_type=type(candidate).__name__,
+                manifest_semantic_context_category=(
+                    manifest.semantic_context_category.value
+                ),
+                manifest_source_format=manifest.source_format.value,
+            )
+
+        # --- Text provenance also requires semantic category agreement ---
+        if (
+            isinstance(candidate, TextEvidenceCandidate)
+            and candidate.semantic_context_category
+            != manifest.semantic_context_category
+        ):
+            raise SemanticContextMismatchError(
+                source_id=candidate.source_id,
+                candidate_category=candidate.semantic_context_category.value,
+                manifest_category=manifest.semantic_context_category.value,
+            )
+
         # --- Derive evidence_scope ---
         evidence_scope = _derive_evidence_scope(
             manifest.source_scope,
@@ -398,6 +499,14 @@ def build_evidence(
         # --- Register in the per-batch evidence registry ---
         seen[evidence_id] = identity_digest
 
+        # --- Preserve the concrete candidate's approved display fields ---
+        if isinstance(candidate, TextEvidenceCandidate):
+            finding = candidate.exact_excerpt
+            supporting_evidence = candidate.exact_excerpt
+        else:
+            finding = candidate.finding
+            supporting_evidence = candidate.supporting_evidence
+
         # --- Build the EvidenceObject ---
         obj = EvidenceObject(
             evidence_id=evidence_id,
@@ -408,8 +517,8 @@ def build_evidence(
             evidence_type=candidate.evidence_type,
             evidence_scope=evidence_scope,
             extraction_method="deterministic",
-            finding=candidate.finding,
-            supporting_evidence=candidate.supporting_evidence,
+            finding=finding,
+            supporting_evidence=supporting_evidence,
             confidence=candidate.confidence,
             limitations=candidate.limitations,
             relevant_roles=candidate.relevant_roles,

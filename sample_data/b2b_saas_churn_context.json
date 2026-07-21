@@ -1,0 +1,7 @@
+{
+  "industry_context": "Synthetic external demo context: B2B SaaS providers commonly monitor renewal timing, product adoption, and support activity when assessing churn risk. This is not company-specific evidence.",
+  "strategy_profile": "Priority: evaluate a limited retention pilot only after the available customer evidence has been reviewed.",
+  "user_assumption": "Unverified assumption: lower recent product usage may indicate elevated churn risk and requires validation against customer outcomes.",
+  "business_question": "Which high-value customer segments, if any, have enough evidence to be considered for a limited retention pilot?",
+  "decision_goal": "Determine whether the available evidence is sufficient to propose a limited retention pilot for human review."
+}
