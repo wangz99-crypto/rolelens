@@ -1,5 +1,5 @@
 """
-app/schemas.py — RoleLens core identity and provenance schemas (Task 1 / Task 5B-1).
+app/schemas.py — RoleLens core identity and provenance schemas (Task 1 / Task 5B-1 / Task 6A-1).
 
 Defines all Pydantic v2 models for:
   - Enums: SourceFormat, SemanticContextCategory, SourceScope,
@@ -11,6 +11,9 @@ Defines all Pydantic v2 models for:
   - EvidenceReference
   - HealthFindingCandidate
   - TextEvidenceCandidate  (Task 5B-1)
+  - RoleKey                (Task 6A-1)
+  - GroundedFinding        (Task 6A-1)
+  - RoleView               (Task 6A-1)
 
 ID generation and hashing belong in app/identity.py (Task 2).
 This module validates ID format and digest format only.
@@ -18,6 +21,7 @@ This module validates ID format and digest format only.
 Architecture invariants enforced here:
   - HealthFindingCandidate has no evidence_id field (minting boundary).
   - TextEvidenceCandidate has no evidence_id or identity_digest (minting boundary).
+  - RoleView requires at least one GroundedFinding — no evidence means no RoleView.
   - EvidenceStatus contains only "active" and "invalidated".
   - Cross-object reference existence is NOT validated here.
   - All models use extra="forbid" and frozen=True.
@@ -1231,3 +1235,156 @@ class TextEvidenceCandidate(ContractModel):
                 )
 
         return self
+
+
+# ---------------------------------------------------------------------------
+# Task 6A-1 — RoleKey, GroundedFinding, RoleView
+# ---------------------------------------------------------------------------
+
+
+def _validate_str_list_no_blank_or_dup(values: list[str], field: str) -> None:
+    """Shared helper: reject blank strings and duplicates in a string list field."""
+    blank = [v for v in values if not v or not v.strip()]
+    if blank:
+        raise ValueError(f"{field} must not contain blank strings")
+    if len(values) != len(set(values)):
+        raise ValueError(f"{field} must not contain duplicate strings")
+
+
+class RoleKey(str, Enum):
+    """Machine keys for the five V1 roles.
+
+    Values must exactly match the keys in config/role_policy.json.
+    No display names are attached here — display names are in the policy file.
+    """
+
+    executive = "executive"
+    data_analyst = "data_analyst"
+    data_engineer = "data_engineer"
+    sales_marketing = "sales_marketing"
+    project_manager = "project_manager"
+
+
+class GroundedFinding(ContractModel):
+    """One claim produced by a role view, grounded in cited Evidence Objects.
+
+    Every claim must be backed by at least one EvidenceReference.
+    The later role engine will validate that each referenced evidence_id:
+      - exists in the current trajectory
+      - has status='active'
+      - was included in the evidence set exposed to the provider call
+
+    This schema validates format only, not registry existence.
+    """
+
+    claim: str = Field(..., description="The role-specific claim or observation (non-blank)")
+    evidence_references: list[EvidenceReference] = Field(
+        ..., description="Non-empty list of Evidence Objects that ground this claim"
+    )
+    confidence: Literal["low", "medium", "high"] = Field(
+        ..., description="Confidence level for this claim"
+    )
+
+    @field_validator("claim")
+    @classmethod
+    def claim_non_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("claim must not be blank or whitespace-only")
+        return v
+
+    @field_validator("evidence_references")
+    @classmethod
+    def evidence_references_non_empty_unique(
+        cls, v: list[EvidenceReference]
+    ) -> list[EvidenceReference]:
+        """evidence_references must be non-empty and evidence_id values must be unique."""
+        if not v:
+            raise ValueError("evidence_references must not be empty")
+        ids = [ref.evidence_id for ref in v]
+        if len(ids) != len(set(ids)):
+            raise ValueError(
+                "evidence_references must not contain duplicate evidence_id values "
+                "within a single GroundedFinding"
+            )
+        return v
+
+
+class RoleView(ContractModel):
+    """The output produced by one role provider for a given decision context.
+
+    key_findings must be non-empty: no evidence means no RoleView.
+    The later role engine returns a typed failure instead of creating a
+    citation-free RoleView.
+
+    Duplicate evidence IDs across different GroundedFinding records are allowed
+    because one Evidence Object may legitimately support multiple claims.
+
+    next_action and dependency are optional but must not be blank when supplied.
+    """
+
+    role_key: RoleKey = Field(..., description="Machine key of the role producing this view")
+    role_concern: str = Field(
+        ..., description="The primary concern this role brings to the decision (non-blank)"
+    )
+    key_findings: list[GroundedFinding] = Field(
+        ..., description="Non-empty list of grounded claims produced by this role"
+    )
+    risks_or_assumptions: list[str] = Field(
+        default_factory=list,
+        description="Risks or unverified assumptions identified; no blank or duplicate strings",
+    )
+    missing_information: list[str] = Field(
+        default_factory=list,
+        description="Information gaps that limit this role's analysis; no blank or duplicate strings",
+    )
+    next_action: str | None = Field(
+        None, description="Recommended next action, when applicable (non-blank if supplied)"
+    )
+    dependency: str | None = Field(
+        None, description="Blocking dependency, when applicable (non-blank if supplied)"
+    )
+    human_review_required: bool = Field(
+        ..., description="Whether human review is required before acting on this view"
+    )
+
+    @field_validator("role_concern")
+    @classmethod
+    def role_concern_non_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("role_concern must not be blank or whitespace-only")
+        return v
+
+    @field_validator("key_findings")
+    @classmethod
+    def key_findings_non_empty(cls, v: list[GroundedFinding]) -> list[GroundedFinding]:
+        if not v:
+            raise ValueError(
+                "key_findings must not be empty; no evidence means no RoleView"
+            )
+        return v
+
+    @field_validator("risks_or_assumptions")
+    @classmethod
+    def risks_no_blank_or_duplicate(cls, v: list[str]) -> list[str]:
+        _validate_str_list_no_blank_or_dup(v, "risks_or_assumptions")
+        return v
+
+    @field_validator("missing_information")
+    @classmethod
+    def missing_info_no_blank_or_duplicate(cls, v: list[str]) -> list[str]:
+        _validate_str_list_no_blank_or_dup(v, "missing_information")
+        return v
+
+    @field_validator("next_action")
+    @classmethod
+    def next_action_non_blank(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            raise ValueError("next_action must not be blank when supplied")
+        return v
+
+    @field_validator("dependency")
+    @classmethod
+    def dependency_non_blank(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            raise ValueError("dependency must not be blank when supplied")
+        return v
