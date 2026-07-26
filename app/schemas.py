@@ -1542,3 +1542,124 @@ class RiskReviewResult(ContractModel):
                 f"any(finding.requires_human_review) which is {expected_review!r}"
             )
         return self
+
+
+# ---------------------------------------------------------------------------
+# Task 7B-1 — probabilistic semantic-risk review contracts
+# ---------------------------------------------------------------------------
+
+
+class SemanticRiskCode(str, Enum):
+    """Machine keys for provider-generated semantic review candidates."""
+
+    citation_claim_mismatch = "citation_claim_mismatch"
+    unsupported_company_specific_claim = "unsupported_company_specific_claim"
+    causation_overreach = "causation_overreach"
+    unsupported_roi_or_budget = "unsupported_roi_or_budget"
+    role_boundary_violation = "role_boundary_violation"
+    unsupported_completion_or_validation_claim = (
+        "unsupported_completion_or_validation_claim"
+    )
+
+
+class SemanticReviewDisposition(str, Enum):
+    """Human-review disposition proposed by the semantic reviewer."""
+
+    needs_human_review = "needs_human_review"
+    likely_supported = "likely_supported"
+    reviewer_uncertain = "reviewer_uncertain"
+
+
+class SemanticRiskCandidate(ContractModel):
+    """One probabilistic semantic-review candidate, not a RiskFinding."""
+
+    risk_code: SemanticRiskCode
+    role_key: RoleKey
+    claim_index: int = Field(..., ge=0)
+    evidence_ids: list[str]
+    explanation: str
+    review_question: str
+    confidence: Literal["low", "medium", "high"]
+    disposition: SemanticReviewDisposition
+
+    @field_validator("evidence_ids")
+    @classmethod
+    def evidence_ids_non_empty_valid_unique(cls, v: list[str]) -> list[str]:
+        """Require at least one valid, unique evidence identifier."""
+        if not v:
+            raise ValueError("evidence_ids must not be empty")
+        for evidence_id in v:
+            _validate_evidence_id(evidence_id)
+        if len(v) != len(set(v)):
+            raise ValueError(
+                "evidence_ids must not contain duplicate evidence_id values"
+            )
+        return v
+
+    @field_validator("explanation")
+    @classmethod
+    def explanation_non_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("explanation must not be blank")
+        return v
+
+    @field_validator("review_question")
+    @classmethod
+    def review_question_non_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("review_question must not be blank")
+        return v
+
+
+class SemanticRiskReviewResult(ContractModel):
+    """Validated output of one probabilistic semantic-risk review."""
+
+    candidates: list[SemanticRiskCandidate] = Field(default_factory=list)
+    reviewed_role_keys: list[RoleKey]
+    reviewer_model: str | None
+    human_review_required: bool
+
+    @field_validator("reviewed_role_keys")
+    @classmethod
+    def reviewed_role_keys_unique_fixed_order(
+        cls,
+        v: list[RoleKey],
+    ) -> list[RoleKey]:
+        """Require a duplicate-free subsequence of the fixed role order."""
+        if len(v) != len(set(v)):
+            raise ValueError(
+                "reviewed_role_keys must not contain duplicate role keys"
+            )
+        positions = {role_key: index for index, role_key in enumerate(_ROLE_EXECUTION_ORDER)}
+        if v != sorted(v, key=positions.__getitem__):
+            raise ValueError(
+                "reviewed_role_keys must preserve the fixed role execution order"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def semantic_review_consistency(self) -> "SemanticRiskReviewResult":
+        """Validate candidate roles and the derived human-review flag."""
+        reviewed = set(self.reviewed_role_keys)
+        unreviewed_candidate_roles = {
+            candidate.role_key
+            for candidate in self.candidates
+            if candidate.role_key not in reviewed
+        }
+        if unreviewed_candidate_roles:
+            raise ValueError(
+                "SemanticRiskCandidate role_key values must be present in "
+                "reviewed_role_keys"
+            )
+
+        expected_review = any(
+            candidate.disposition != SemanticReviewDisposition.likely_supported
+            for candidate in self.candidates
+        )
+        if self.human_review_required != expected_review:
+            raise ValueError(
+                f"human_review_required={self.human_review_required!r} does not "
+                "match whether any candidate disposition requires review "
+                f"({expected_review!r})"
+            )
+        return self
