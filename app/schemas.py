@@ -1388,3 +1388,157 @@ class RoleView(ContractModel):
         if v is not None and not v.strip():
             raise ValueError("dependency must not be blank when supplied")
         return v
+
+
+# ---------------------------------------------------------------------------
+# Task 7A — RiskCode, RiskSeverity, RiskFinding, RiskReviewResult
+# ---------------------------------------------------------------------------
+
+_ROLE_EXECUTION_ORDER: list[RoleKey] = [
+    RoleKey.executive,
+    RoleKey.data_analyst,
+    RoleKey.data_engineer,
+    RoleKey.sales_marketing,
+    RoleKey.project_manager,
+]
+
+
+class RiskCode(str, Enum):
+    """Machine keys for deterministic epistemic and workflow risk codes.
+
+    Task 7A produces only these codes.  Semantic claim review (causation,
+    ROI/budget, natural-language boundary violations) belongs to Task 7B.
+    """
+
+    external_context_only       = "external_context_only"
+    assumption_only             = "assumption_only"
+    stated_priority_only        = "stated_priority_only"
+    assumption_not_declared     = "assumption_not_declared"
+    action_without_internal_evidence = "action_without_internal_evidence"
+    human_review_bypass         = "human_review_bypass"
+    insufficient_evidence       = "insufficient_evidence"
+    role_generation_failure     = "role_generation_failure"
+
+
+class RiskSeverity(str, Enum):
+    """Severity levels for RiskFinding records."""
+
+    low      = "low"
+    medium   = "medium"
+    high     = "high"
+    critical = "critical"
+
+
+class RiskFinding(ContractModel):
+    """One deterministic risk finding produced by the Task 7A risk checker.
+
+    Does not contain free-form model reasoning or provider metadata.
+    """
+
+    risk_code: RiskCode = Field(..., description="Machine key identifying the risk type")
+    severity: RiskSeverity = Field(..., description="Severity level of this risk")
+    role_key: RoleKey = Field(..., description="Role for which this finding was produced")
+    claim_index: int | None = Field(
+        None,
+        description="Index into RoleView.key_findings (0-based); None for role-level findings",
+    )
+    evidence_ids: list[str] = Field(
+        default_factory=list,
+        description="evidence_id values involved in this risk finding; no duplicates",
+    )
+    message: str = Field(..., description="Human-readable description of the risk (non-blank)")
+    required_action: str = Field(
+        ..., description="What must be done to resolve or mitigate this risk (non-blank)"
+    )
+    blocks_downstream: bool = Field(
+        ..., description="Whether this risk blocks downstream pipeline execution"
+    )
+    requires_human_review: bool = Field(
+        ..., description="Whether this risk requires a human reviewer to proceed"
+    )
+
+    @field_validator("claim_index")
+    @classmethod
+    def claim_index_non_negative(cls, v: int | None) -> int | None:
+        if v is not None and v < 0:
+            raise ValueError("claim_index must be >= 0 when supplied")
+        return v
+
+    @field_validator("evidence_ids")
+    @classmethod
+    def evidence_ids_valid_and_unique(cls, v: list[str]) -> list[str]:
+        """evidence_ids must be valid EvidenceReference-style IDs with no duplicates."""
+        for eid in v:
+            if not _EVIDENCE_ID_RE.match(eid):
+                raise ValueError(
+                    f"evidence_ids contains an invalid evidence_id: {eid!r}"
+                )
+        if len(v) != len(set(v)):
+            raise ValueError("evidence_ids must not contain duplicate evidence_id values")
+        return v
+
+    @field_validator("message")
+    @classmethod
+    def message_non_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("message must not be blank")
+        return v
+
+    @field_validator("required_action")
+    @classmethod
+    def required_action_non_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("required_action must not be blank")
+        return v
+
+
+class RiskReviewResult(ContractModel):
+    """The complete output of one check_role_risks() call.
+
+    reviewed_role_keys must contain exactly the five RoleKey values in fixed
+    execution order.  has_blocking_risks and human_review_required are derived
+    from the findings list and must equal the corresponding aggregate.
+    """
+
+    findings: list[RiskFinding] = Field(
+        default_factory=list,
+        description="All RiskFinding records produced for this run",
+    )
+    reviewed_role_keys: list[RoleKey] = Field(
+        ...,
+        description="The five RoleKey values in fixed execution order",
+    )
+    has_blocking_risks: bool = Field(
+        ..., description="True iff any finding has blocks_downstream=True"
+    )
+    human_review_required: bool = Field(
+        ..., description="True iff any finding has requires_human_review=True"
+    )
+
+    @field_validator("reviewed_role_keys")
+    @classmethod
+    def reviewed_role_keys_fixed_order(cls, v: list[RoleKey]) -> list[RoleKey]:
+        """Must contain exactly the five RoleKey values in the fixed execution order."""
+        if v != _ROLE_EXECUTION_ORDER:
+            raise ValueError(
+                f"reviewed_role_keys must be exactly {[k.value for k in _ROLE_EXECUTION_ORDER]!r} "
+                f"in that order, got {[k.value for k in v]!r}"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def derived_flags_consistent(self) -> "RiskReviewResult":
+        """has_blocking_risks and human_review_required must match the findings."""
+        expected_blocking = any(f.blocks_downstream for f in self.findings)
+        if self.has_blocking_risks != expected_blocking:
+            raise ValueError(
+                f"has_blocking_risks={self.has_blocking_risks!r} does not match "
+                f"any(finding.blocks_downstream) which is {expected_blocking!r}"
+            )
+        expected_review = any(f.requires_human_review for f in self.findings)
+        if self.human_review_required != expected_review:
+            raise ValueError(
+                f"human_review_required={self.human_review_required!r} does not match "
+                f"any(finding.requires_human_review) which is {expected_review!r}"
+            )
+        return self
