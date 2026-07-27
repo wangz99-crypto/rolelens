@@ -89,7 +89,46 @@ This is not a generic-LLM baseline and should not be reported as one.
 
 ## Recording a live Granite result
 
-Live calls occur outside this offline evaluation pack:
+Task 7D provides an explicit live runner. From the repository root, the exact
+all-scenario command is:
+
+```text
+python scripts/run_live_semantic_evaluation.py --confirm-live
+```
+
+To run a fixed subset, repeat the scenario option:
+
+```text
+python scripts/run_live_semantic_evaluation.py --confirm-live --scenario S2_unsupported_roi_budget --scenario S7_citation_claim_mismatch
+```
+
+`--confirm-live` is mandatory so that importing the runner, inspecting CLI
+help, or accidentally omitting the flag cannot construct the provider or make
+a paid network call. The complete fixture pack makes exactly eight sequential
+provider calls: one call per scenario, with no retries, parallel calls, or
+fallback model.
+
+The default sanitized outputs are:
+
+```text
+artifacts/evaluation/semantic-evaluation-<run_id>.json
+artifacts/evaluation/semantic-evaluation-<run_id>.md
+```
+
+An existing artifact is never overwritten. Live calls occur outside the
+offline evaluation tests:
+
+Each JSON scenario record and each Markdown expected cell preserves the full
+bounded expectation: required codes, acceptable alternative codes, prohibited
+codes, allowed dispositions, and minimum/maximum candidate counts. Artifacts
+must not reduce the expectation to `must_detect` alone.
+
+In particular, "no mandatory code" does not necessarily mean zero candidates.
+S1 has no required or acceptable codes and requires exactly zero candidates.
+S8 has no uniquely mandatory code but requires one or two candidates chosen
+from `citation_claim_mismatch` and
+`unsupported_company_specific_claim`, with `reviewer_uncertain` or
+`needs_human_review` disposition.
 
 1. Run the existing production semantic reviewer in an approved environment,
    loading credentials only from environment variables or an approved secret
@@ -108,6 +147,19 @@ Live calls occur outside this offline evaluation pack:
 7. Have a human reviewer approve or correct the label before using it in a
    report. Never copy model output into fixtures as ground truth without human
    review.
+
+Every generated record begins with `pending_human_review`. A human reviewer
+must inspect the fixture expectation, detected codes, disposition, and failure
+reasons, then add notes to a separate reviewed copy or evaluation record. Do
+not edit `semantic_risk_v1.json` to make a model output pass, and do not promote
+model output into fixture ground truth automatically.
+
+A failed scenario must be reported and annotated; it must not be deleted,
+silently skipped, or omitted from the completed run. The deterministic model
+score records agreement with the current fixture expectations. A
+human-approved score exists only after a reviewer explicitly accepts or
+corrects the scenario labels. These two scores must remain distinguishable,
+and neither is statistical proof of general reliability.
 
 Suggested result table:
 
