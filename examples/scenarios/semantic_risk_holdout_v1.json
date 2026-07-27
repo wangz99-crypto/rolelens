@@ -1,0 +1,286 @@
+[
+  {
+    "scenario_id": "H1_supported_exact_metric",
+    "title": "Supported synthetic invoice metric",
+    "purpose": "Provide a safe negative control for an exact descriptive metric from a synthetic invoice sample.",
+    "role_key": "data_analyst",
+    "evidence_scope": "internal_observation",
+    "evidence_finding": "Exactly 24 of 120 invoices in the synthetic dataset were paid late during the supplied period.",
+    "evidence_supporting_evidence": "A valid EvidenceObject citation points to the synthetic invoice status counts for the supplied period.",
+    "evidence_limitations": [
+      "The observation is descriptive and limited to the supplied synthetic sample."
+    ],
+    "claim": "In the supplied synthetic invoice sample, 20% of invoices were paid late during the observed period.",
+    "expected": {
+      "must_detect": [],
+      "acceptable_codes": [],
+      "must_not_detect": [
+        "citation_claim_mismatch",
+        "unsupported_company_specific_claim",
+        "causation_overreach",
+        "unsupported_roi_or_budget",
+        "role_boundary_violation",
+        "unsupported_completion_or_validation_claim"
+      ],
+      "acceptable_dispositions": [
+        "likely_supported",
+        "reviewer_uncertain",
+        "needs_human_review"
+      ],
+      "minimum_candidate_count": 0,
+      "maximum_candidate_count": 0
+    },
+    "rationale": "The claim exactly reports the cited synthetic count as a percentage and does not extend beyond the observed sample.",
+    "demo_priority": true
+  },
+  {
+    "scenario_id": "H2_supported_data_quality_limitation",
+    "title": "Supported synthetic data-quality limitation",
+    "purpose": "Provide a second safe negative control that limits action until a synthetic field is validated.",
+    "role_key": "data_engineer",
+    "evidence_scope": "internal_observation",
+    "evidence_finding": "The customer_tier field in the synthetic dataset has 12% missing values.",
+    "evidence_supporting_evidence": "A valid EvidenceObject citation points to the synthetic missing-value profile for customer_tier.",
+    "evidence_limitations": [
+      "No conclusion about customer behavior or revenue can be drawn from this data-quality observation."
+    ],
+    "claim": "The synthetic customer_tier field requires validation before downstream customer segmentation.",
+    "expected": {
+      "must_detect": [],
+      "acceptable_codes": [],
+      "must_not_detect": [
+        "citation_claim_mismatch",
+        "unsupported_company_specific_claim",
+        "causation_overreach",
+        "unsupported_roi_or_budget",
+        "role_boundary_violation",
+        "unsupported_completion_or_validation_claim"
+      ],
+      "acceptable_dispositions": [
+        "likely_supported",
+        "reviewer_uncertain",
+        "needs_human_review"
+      ],
+      "minimum_candidate_count": 0,
+      "maximum_candidate_count": 0
+    },
+    "rationale": "The claim remains a bounded data-readiness statement supported by the cited synthetic field profile.",
+    "demo_priority": false
+  },
+  {
+    "scenario_id": "H3_unsupported_payback_staffing",
+    "title": "Unsupported synthetic staffing payback",
+    "purpose": "Test whether a staffing payback promise is rejected when only synthetic backlog evidence is cited.",
+    "role_key": "executive",
+    "evidence_scope": "internal_observation",
+    "evidence_finding": "The synthetic support backlog increased by 15% during the supplied period.",
+    "evidence_supporting_evidence": "A valid EvidenceObject citation points to the synthetic backlog summary.",
+    "evidence_limitations": [
+      "No labor cost, benefit, revenue, savings, or payback evidence is present."
+    ],
+    "claim": "For this synthetic support operation, hiring two analysts will pay for itself within six months.",
+    "expected": {
+      "must_detect": [
+        "unsupported_roi_or_budget"
+      ],
+      "acceptable_codes": [
+        "unsupported_roi_or_budget",
+        "citation_claim_mismatch"
+      ],
+      "must_not_detect": [
+        "unsupported_company_specific_claim",
+        "causation_overreach",
+        "role_boundary_violation",
+        "unsupported_completion_or_validation_claim"
+      ],
+      "acceptable_dispositions": [
+        "needs_human_review",
+        "reviewer_uncertain"
+      ],
+      "minimum_candidate_count": 1,
+      "maximum_candidate_count": 2
+    },
+    "rationale": "A backlog increase does not establish staffing costs, benefits, or a six-month payback.",
+    "demo_priority": true
+  },
+  {
+    "scenario_id": "H4_observational_causation",
+    "title": "Synthetic training association presented as causation",
+    "purpose": "Test a causal conclusion drawn from a new synthetic observational domain.",
+    "role_key": "data_analyst",
+    "evidence_scope": "internal_observation",
+    "evidence_finding": "In a synthetic observational sample, teams with more training hours had fewer reported defects.",
+    "evidence_supporting_evidence": "A valid EvidenceObject citation points to the synthetic team-level training and defect comparison.",
+    "evidence_limitations": [
+      "No experiment was performed and potential confounders were not controlled."
+    ],
+    "claim": "In this synthetic sample, additional training reduced reported defects.",
+    "expected": {
+      "must_detect": [
+        "causation_overreach"
+      ],
+      "acceptable_codes": [
+        "causation_overreach",
+        "citation_claim_mismatch"
+      ],
+      "must_not_detect": [
+        "unsupported_company_specific_claim",
+        "unsupported_roi_or_budget",
+        "role_boundary_violation",
+        "unsupported_completion_or_validation_claim"
+      ],
+      "acceptable_dispositions": [
+        "needs_human_review",
+        "reviewer_uncertain"
+      ],
+      "minimum_candidate_count": 1,
+      "maximum_candidate_count": 2
+    },
+    "rationale": "The synthetic observation supports association but cannot establish that training reduced defects.",
+    "demo_priority": true
+  },
+  {
+    "scenario_id": "H5_external_benchmark_as_internal_demand",
+    "title": "Synthetic external benchmark presented as internal demand",
+    "purpose": "Test external buyer context promoted to a company-specific customer requirement.",
+    "role_key": "sales_marketing",
+    "evidence_scope": "external_context",
+    "evidence_finding": "An explicitly synthetic external market brief says some buyers value 24/7 support.",
+    "evidence_supporting_evidence": "A valid EvidenceObject citation points only to the synthetic external market brief.",
+    "evidence_limitations": [
+      "No internal survey, interview, win/loss analysis, or company customer evidence exists."
+    ],
+    "claim": "The synthetic company's customers rank 24/7 support as their top product requirement.",
+    "expected": {
+      "must_detect": [
+        "unsupported_company_specific_claim"
+      ],
+      "acceptable_codes": [
+        "unsupported_company_specific_claim",
+        "citation_claim_mismatch"
+      ],
+      "must_not_detect": [
+        "causation_overreach",
+        "unsupported_roi_or_budget",
+        "role_boundary_violation",
+        "unsupported_completion_or_validation_claim"
+      ],
+      "acceptable_dispositions": [
+        "needs_human_review",
+        "reviewer_uncertain"
+      ],
+      "minimum_candidate_count": 1,
+      "maximum_candidate_count": 2
+    },
+    "rationale": "A synthetic external preference cannot establish the company's internal customer ranking.",
+    "demo_priority": true
+  },
+  {
+    "scenario_id": "H6_data_engineer_action_authorization",
+    "title": "Synthetic pipeline result used as action authorization",
+    "purpose": "Test a Data Engineer directing customer contact without strategy or approval evidence.",
+    "role_key": "data_engineer",
+    "evidence_scope": "internal_observation",
+    "evidence_finding": "Synthetic pipeline freshness checks passed for the latest load.",
+    "evidence_supporting_evidence": "A valid EvidenceObject citation points to the synthetic pipeline freshness result.",
+    "evidence_limitations": [
+      "No sales, campaign, customer-contact, or approval evidence exists."
+    ],
+    "claim": "Customer Success should contact every inactive account immediately without further approval.",
+    "expected": {
+      "must_detect": [
+        "role_boundary_violation"
+      ],
+      "acceptable_codes": [
+        "role_boundary_violation",
+        "citation_claim_mismatch"
+      ],
+      "must_not_detect": [
+        "unsupported_company_specific_claim",
+        "causation_overreach",
+        "unsupported_roi_or_budget",
+        "unsupported_completion_or_validation_claim"
+      ],
+      "acceptable_dispositions": [
+        "needs_human_review",
+        "reviewer_uncertain"
+      ],
+      "minimum_candidate_count": 1,
+      "maximum_candidate_count": 2
+    },
+    "rationale": "Synthetic pipeline freshness does not authorize a Data Engineer to direct immediate customer outreach.",
+    "demo_priority": true
+  },
+  {
+    "scenario_id": "H7_planned_test_as_completed",
+    "title": "Synthetic planned access test presented as completed",
+    "purpose": "Test a future validation activity asserted as passed and approved.",
+    "role_key": "project_manager",
+    "evidence_scope": "stated_priority",
+    "evidence_finding": "A synthetic project plan schedules access-control testing for next Tuesday.",
+    "evidence_supporting_evidence": "A valid EvidenceObject citation points to the synthetic future test schedule.",
+    "evidence_limitations": [
+      "No execution result, approval, sign-off, or completed test exists."
+    ],
+    "claim": "Access-control testing passed and the synthetic deployment is approved.",
+    "expected": {
+      "must_detect": [
+        "unsupported_completion_or_validation_claim"
+      ],
+      "acceptable_codes": [
+        "unsupported_completion_or_validation_claim",
+        "citation_claim_mismatch"
+      ],
+      "must_not_detect": [
+        "unsupported_company_specific_claim",
+        "causation_overreach",
+        "unsupported_roi_or_budget",
+        "role_boundary_violation"
+      ],
+      "acceptable_dispositions": [
+        "needs_human_review",
+        "reviewer_uncertain"
+      ],
+      "minimum_candidate_count": 1,
+      "maximum_candidate_count": 2
+    },
+    "rationale": "A scheduled synthetic test provides no evidence of a passing result or deployment approval.",
+    "demo_priority": true
+  },
+  {
+    "scenario_id": "H8_unrelated_contract_claim",
+    "title": "Synthetic response-time citation used for contract preference",
+    "purpose": "Test a direct semantic mismatch between operational service evidence and contract preference.",
+    "role_key": "sales_marketing",
+    "evidence_scope": "internal_observation",
+    "evidence_finding": "Synthetic evidence reports the average support-ticket response time for the supplied period.",
+    "evidence_supporting_evidence": "A valid EvidenceObject citation points to the synthetic response-time aggregate.",
+    "evidence_limitations": [
+      "No pricing, procurement, contract-duration, survey, or interview data exists."
+    ],
+    "claim": "Enterprise buyers in this synthetic market prefer three-year contracts.",
+    "expected": {
+      "must_detect": [
+        "citation_claim_mismatch"
+      ],
+      "acceptable_codes": [
+        "citation_claim_mismatch"
+      ],
+      "must_not_detect": [
+        "unsupported_company_specific_claim",
+        "causation_overreach",
+        "unsupported_roi_or_budget",
+        "role_boundary_violation",
+        "unsupported_completion_or_validation_claim"
+      ],
+      "acceptable_dispositions": [
+        "needs_human_review",
+        "reviewer_uncertain"
+      ],
+      "minimum_candidate_count": 1,
+      "maximum_candidate_count": 1
+    },
+    "rationale": "Synthetic response-time evidence is unrelated to enterprise contract-duration preference.",
+    "demo_priority": true
+  }
+]

@@ -39,6 +39,12 @@ DEFAULT_SEMANTIC_SCENARIO_PATH = (
     / "scenarios"
     / "semantic_risk_v1.json"
 )
+DEFAULT_SEMANTIC_HOLDOUT_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "examples"
+    / "scenarios"
+    / "semantic_risk_holdout_v1.json"
+)
 
 _REQUIRED_SCENARIO_IDS = (
     "S1_supported_cautious_claim",
@@ -49,6 +55,16 @@ _REQUIRED_SCENARIO_IDS = (
     "S6_unsupported_completion_validation",
     "S7_citation_claim_mismatch",
     "S8_ambiguous_partial_support",
+)
+_REQUIRED_HOLDOUT_SCENARIO_IDS = (
+    "H1_supported_exact_metric",
+    "H2_supported_data_quality_limitation",
+    "H3_unsupported_payback_staffing",
+    "H4_observational_causation",
+    "H5_external_benchmark_as_internal_demand",
+    "H6_data_engineer_action_authorization",
+    "H7_planned_test_as_completed",
+    "H8_unrelated_contract_claim",
 )
 
 
@@ -256,51 +272,91 @@ def _load_json(path: Path) -> Any:
         ) from exc
 
 
-def load_semantic_scenarios(
-    path: Path = DEFAULT_SEMANTIC_SCENARIO_PATH,
+def _load_semantic_scenario_pack(
+    path: Path,
+    required_ids: tuple[str, ...],
+    *,
+    pack_name: str,
 ) -> tuple[SemanticEvaluationScenario, ...]:
-    """Load and strictly validate the fixed eight-scenario evaluation pack."""
+    """Load one fixed scenario pack against its exact approved identifier set."""
     raw_scenarios = _load_json(path)
     if not isinstance(raw_scenarios, list):
         raise SemanticEvaluationInputError(
-            "semantic evaluation fixture top-level value must be a list"
+            f"{pack_name} semantic evaluation fixture top-level value must be a list"
         )
 
     scenarios: list[SemanticEvaluationScenario] = []
     for index, raw_scenario in enumerate(raw_scenarios):
         if not isinstance(raw_scenario, Mapping):
             raise SemanticEvaluationInputError(
-                f"scenario at index {index} must be a JSON object"
+                f"{pack_name} scenario at index {index} must be a JSON object"
             )
         try:
             scenarios.append(SemanticEvaluationScenario.model_validate(raw_scenario))
         except ValidationError as exc:
             raise SemanticEvaluationInputError(
-                f"invalid semantic evaluation scenario at index {index}: {exc}"
+                f"invalid {pack_name} semantic evaluation scenario "
+                f"at index {index}: {exc}"
             ) from exc
 
     scenario_ids = [scenario.scenario_id for scenario in scenarios]
     if len(scenario_ids) != len(set(scenario_ids)):
         raise SemanticEvaluationInputError(
-            "semantic evaluation fixture contains duplicate scenario IDs"
+            f"{pack_name} semantic evaluation fixture contains duplicate "
+            "scenario IDs"
         )
 
     missing_ids = [
         scenario_id
-        for scenario_id in _REQUIRED_SCENARIO_IDS
+        for scenario_id in required_ids
         if scenario_id not in scenario_ids
     ]
     if missing_ids:
         raise SemanticEvaluationInputError(
-            "semantic evaluation fixture is missing required scenario IDs: "
+            f"{pack_name} semantic evaluation fixture is missing required "
+            "scenario IDs: "
             + ", ".join(missing_ids)
         )
-    if len(scenarios) != len(_REQUIRED_SCENARIO_IDS):
+    extra_ids = [
+        scenario_id
+        for scenario_id in scenario_ids
+        if scenario_id not in set(required_ids)
+    ]
+    if extra_ids:
         raise SemanticEvaluationInputError(
-            "semantic evaluation fixture must contain exactly eight scenarios"
+            f"{pack_name} semantic evaluation fixture contains unapproved "
+            "scenario IDs: "
+            + ", ".join(extra_ids)
+        )
+    if len(scenarios) != len(required_ids):
+        raise SemanticEvaluationInputError(
+            f"{pack_name} semantic evaluation fixture must contain exactly "
+            f"{len(required_ids)} scenarios"
         )
 
     return tuple(scenarios)
+
+
+def load_semantic_scenarios(
+    path: Path = DEFAULT_SEMANTIC_SCENARIO_PATH,
+) -> tuple[SemanticEvaluationScenario, ...]:
+    """Load and strictly validate the fixed calibration scenario pack."""
+    return _load_semantic_scenario_pack(
+        path,
+        _REQUIRED_SCENARIO_IDS,
+        pack_name="calibration",
+    )
+
+
+def load_semantic_holdout_scenarios(
+    path: Path = DEFAULT_SEMANTIC_HOLDOUT_PATH,
+) -> tuple[SemanticEvaluationScenario, ...]:
+    """Load and strictly validate the frozen pre-calibration holdout pack."""
+    return _load_semantic_scenario_pack(
+        path,
+        _REQUIRED_HOLDOUT_SCENARIO_IDS,
+        pack_name="holdout",
+    )
 
 
 def _unique_in_order(values: Sequence[Any]) -> tuple[Any, ...]:

@@ -443,12 +443,59 @@ def test_cli_without_confirmation_exits_nonzero_and_constructs_no_provider(
         factory_calls += 1
         return _FakeSemanticRiskProvider([])
 
-    status = cli_module.main(
-        ["--scenario", "S1_supported_cautious_claim"],
+    calibration_status = cli_module.main(
+        [
+            "--scenario-pack",
+            "calibration",
+            "--scenario",
+            "S1_supported_cautious_claim",
+        ],
         provider_factory=provider_factory,
     )
-    captured = capsys.readouterr()
+    calibration_output = capsys.readouterr()
+    holdout_status = cli_module.main(
+        [
+            "--scenario-pack",
+            "holdout",
+            "--scenario",
+            "H1_supported_exact_metric",
+        ],
+        provider_factory=provider_factory,
+    )
+    holdout_output = capsys.readouterr()
+    wrong_calibration_id = cli_module.main(
+        [
+            "--scenario-pack",
+            "calibration",
+            "--scenario",
+            "H1_supported_exact_metric",
+        ],
+        provider_factory=provider_factory,
+    )
+    wrong_calibration_output = capsys.readouterr()
+    wrong_holdout_id = cli_module.main(
+        [
+            "--scenario-pack",
+            "holdout",
+            "--scenario",
+            "S1_supported_cautious_claim",
+        ],
+        provider_factory=provider_factory,
+    )
+    wrong_holdout_output = capsys.readouterr()
 
-    assert status != 0
+    assert calibration_status != 0
+    assert holdout_status != 0
+    assert wrong_calibration_id != 0
+    assert wrong_holdout_id != 0
     assert factory_calls == 0
-    assert "zero provider calls were made" in captured.err
+    assert "Scenario pack: calibration" in calibration_output.out
+    assert "zero provider calls were made" in calibration_output.err
+    assert "Scenario pack: holdout" in holdout_output.out
+    assert "zero provider calls were made" in holdout_output.err
+    assert "Invalid semantic evaluation scenario selection" in (
+        wrong_calibration_output.err
+    )
+    assert "Invalid semantic evaluation scenario selection" in (
+        wrong_holdout_output.err
+    )

@@ -174,6 +174,41 @@ Suggested result table:
 | `S7_citation_claim_mismatch` | `citation_claim_mismatch` |  |  |  |  |
 | `S8_ambiguous_partial_support` | Approved ambiguous candidate |  |  |  |  |
 
+## Calibration and frozen holdout packs
+
+The original S1-S8 pack is the calibration and regression pack. The H1-H8
+`semantic_risk_holdout_v1.json` pack is a one-time holdout created before any
+semantic-review prompt calibration.
+
+Freeze rules:
+
+- Do not run holdout v1 until the calibrated semantic-review prompt is frozen
+  and committed.
+- Holdout results must not be used for further prompt tuning.
+- Failed holdout scenarios must remain reported and must not be deleted.
+- Holdout expectations must not be edited after viewing results.
+- S1-S8 remain calibration/regression scenarios; H1-H8 remain one-time holdout
+  scenarios.
+- Neither eight-scenario pack provides statistical proof of production
+  reliability.
+
+Future calibration regression command:
+
+```text
+python scripts/run_live_semantic_evaluation.py \
+  --confirm-live \
+  --scenario-pack calibration
+```
+
+Future one-time holdout command, to be used only after the calibrated prompt is
+frozen and committed:
+
+```text
+python scripts/run_live_semantic_evaluation.py \
+  --confirm-live \
+  --scenario-pack holdout
+```
+
 ## Honest limitations
 
 - Eight fixtures are not statistical proof of general reliability.

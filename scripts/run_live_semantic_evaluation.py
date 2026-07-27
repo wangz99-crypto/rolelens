@@ -12,7 +12,10 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPOSITORY_ROOT))
 
-from app.evaluation import load_semantic_scenarios
+from app.evaluation import (
+    load_semantic_holdout_scenarios,
+    load_semantic_scenarios,
+)
 from app.evaluation_runner import (
     SemanticEvaluationArtifactError,
     SemanticEvaluationRunnerExecutionError,
@@ -38,6 +41,12 @@ def _parser() -> argparse.ArgumentParser:
         dest="scenario_ids",
         metavar="ID",
         help="Scenario ID to run; repeat to select multiple scenarios.",
+    )
+    parser.add_argument(
+        "--scenario-pack",
+        choices=("calibration", "holdout"),
+        default="calibration",
+        help="Fixed scenario pack to load (default: calibration).",
     )
     parser.add_argument(
         "--output-dir",
@@ -78,7 +87,10 @@ def main(
     """Run the confirmed CLI path and return a process status code."""
     args = _parser().parse_args(argv)
     try:
-        scenarios = load_semantic_scenarios()
+        if args.scenario_pack == "holdout":
+            scenarios = load_semantic_holdout_scenarios()
+        else:
+            scenarios = load_semantic_scenarios()
         selected = select_semantic_evaluation_scenarios(
             scenarios,
             args.scenario_ids,
@@ -87,6 +99,7 @@ def main(
         print("Invalid semantic evaluation scenario selection.", file=sys.stderr)
         return 2
 
+    print(f"Scenario pack: {args.scenario_pack}")
     if not args.confirm_live:
         print(
             "Live semantic evaluation was not confirmed. "
