@@ -1,252 +1,137 @@
-# docs/evaluation.md — RoleLens Evaluation Plan
-
-> 更新日期：2026-07-11  
-> 状态：Evaluation Plan v1  
-> 用途：定义 RoleLens 如何证明自己不是普通 AI wrapper，而是可验证的 AI decision workflow system。
-
----
-
-# 1. Evaluation Goal
-
-RoleLens must prove that it can:
-
-```text
-1. Ground findings in evidence.
-2. Produce role-specific views.
-3. Flag weak assumptions and missing information.
-4. Prevent unsupported business recommendations.
-5. Generate a coherent cross-role action sequence.
-6. Preserve human review before final decision.
-```
-
-The goal is not to prove that RoleLens makes perfect business decisions.  
-The goal is to prove that RoleLens improves decision readiness and exposes risks before action.
-
----
-
-# 2. Evaluation Layers
-
-## Layer 1 — Deterministic Checks
-
-```text
-Schema validity
-Evidence ID exists
-Role output has required fields
-Final memo includes risk section
-Final memo includes human review checklist
-No unsupported role recommendation without evidence
-```
-
-## Layer 2 — Rule-Based Risk Checks
-
-```text
-Missing values above threshold
-Outlier influence detected
-Small sample warning
-External context overused as direct proof
-Action recommended before data validation
-```
-
-## Layer 3 — LLM-Assisted Review
-
-```text
-Does the role view match the role responsibility?
-Is the recommendation too generic?
-Does the memo overstate weak evidence?
-Is the action plan coherent?
-```
-
-## Layer 4 — Human Spot Check
-
-```text
-The output is understandable.
-The role differences are meaningful.
-The risks are visible.
-The workflow plan is actionable.
-```
-
----
-
-# 3. Scenario Set
-
-## Scenario 1 — Missing Usage Data
-
-Expected behavior:
-
-- Data Engineer flags missing field.
-- Data Analyst warns churn interpretation is limited.
-- Sales should not be told to run broad outreach.
-- Project Manager places data validation before sales action.
-
-Hard fail:
-
-```text
-Sales recommends broad outreach without data validation.
-```
-
-## Scenario 2 — Outlier Customer Distorts Revenue
-
-Expected behavior:
-
-- Data health check flags outlier.
-- Executive sees revenue concentration risk.
-- Sales sees high-value account risk but not general market conclusion.
-- Memo warns against overgeneralizing.
-
-Hard fail:
-
-```text
-System claims overall revenue trend is strong without noting concentration risk.
-```
-
-## Scenario 3 — Correlation vs Causation
-
-Expected behavior:
-
-- Data Analyst says this may indicate association, not causation.
-- Memo requests more evidence before causal claim.
-- Risk checker flags correlation-vs-causation.
-
-Hard fail:
-
-```text
-System claims support tickets caused churn without evidence.
-```
-
-## Scenario 4 — Weak Industry Context
-
-Expected behavior:
-
-- Executive uses it as context.
-- System does not treat it as proof that this company’s churn is caused by industry trend.
-- Memo labels it as external context.
-
-Hard fail:
-
-```text
-System uses external report as direct proof of company-specific cause.
-```
-
-## Scenario 5 — Role Dependency
-
-Expected behavior:
-
-- Workflow plan places Data Engineer validation first.
-- Sales action is limited or conditional.
-- PM schedules review after validation.
-
-Hard fail:
-
-```text
-System tells Sales to act before segment validation.
-```
-
-## Scenario 6 — Unsupported Budget Recommendation
-
-Expected behavior:
-
-- Risk checker flags missing ROI/cost evidence.
-- Executive view asks for financial validation.
-- Memo status becomes “Needs more data.”
-
-Hard fail:
-
-```text
-Final memo says “approve budget increase” without evidence.
-```
-
-## Scenario 7 — Role Overreach
-
-Expected behavior:
-
-- Risk checker flags role overreach.
-- Recommendation is routed to Executive review.
-- Data Engineer role is limited to data readiness.
-
-Hard fail:
-
-```text
-System accepts Data Engineer’s strategic recommendation without review.
-```
-
-## Scenario 8 — Human Rejection and Revision
-
-Expected behavior:
-
-- System updates memo.
-- Decision trajectory records the human change.
-- Final memo reflects revised context.
-
-Hard fail:
-
-```text
-Final memo ignores user correction.
-```
-
----
-
-# 4. Scoring Rubric
-
-| Dimension | 0 | 1 | 2 |
-|---|---|---|---|
-| Grounding | Unsupported | Some evidence | Clear evidence references |
-| Role Fit | Generic / wrong role | Partially role-specific | Clearly role-specific |
-| Risk Awareness | No risk | Generic risk | Specific risk tied to evidence |
-| Missing Information | Not shown | Partial | Clear missing info queue |
-| Actionability | Vague | Some action | Ordered actionable next steps |
-| Human Review | Missing | Present but weak | Clear review gate |
-
-Maximum score per scenario: 12.
-
-```text
-0-5: Fail
-6-8: Weak
-9-10: Pass
-11-12: Strong
-```
-
----
-
-# 5. Hard-Fail Conditions
-
-A scenario fails automatically if:
-
-```text
-1. Final memo contains a major unsupported claim.
-2. Recommendation is not tied to evidence or assumption.
-3. Human review is missing for high-risk decision.
-4. Role output violates role boundary.
-5. System hides uncertainty.
-6. System treats external report as direct internal proof.
-```
-
----
-
-# 6. Baseline Comparison
-
-RoleLens should include one simple baseline comparison:
-
-```text
-Baseline:
-Ask a generic LLM to analyze the dataset and give recommendations.
-
-RoleLens:
-Evidence objects + role views + risk checks + workflow plan + human review.
-```
-
-Evaluation question:
-
-```text
-What does RoleLens expose that the generic LLM answer hides?
-```
-
-Expected differences:
-
-```text
-Role-specific responsibilities
-Evidence IDs
-Missing information
-Dependency sequence
-Human review gates
-Decision readiness status
-```
+# RoleLens Semantic Risk Evaluation Pack
+
+## Purpose
+
+Fixed, human-reviewed scenarios make semantic-review changes reproducible. They
+let the same validated `SemanticRiskReviewResult` be scored with exact enum,
+count, and disposition rules rather than with keyword matching or another
+model. This harness never calls Granite.
+
+The pack separates three concerns:
+
+- Task 7A deterministic checks validate structural invariants such as evidence
+  existence, active status, scope restrictions, and role-output identity.
+- Task 7B probabilistic semantic review proposes non-authoritative candidates
+  for risks that require interpreting the relationship between a claim and its
+  cited evidence.
+- Task 7C deterministically compares an already-produced reviewer result with
+  human-reviewed fixture expectations.
+
+A Task 7C pass means that one output satisfies one approved expectation. It
+does not prove that the output is true or that the reviewer is generally
+reliable.
+
+## Fixed scenarios
+
+| Scenario | Intended evaluation |
+|---|---|
+| `S1_supported_cautious_claim` | A directly supported, carefully scoped claim may pass with no candidate. |
+| `S2_unsupported_roi_budget` | Detect an ROI or budget claim unsupported by financial evidence. |
+| `S3_causation_overreach` | Detect causation asserted from observational association. |
+| `S4_external_context_as_company_fact` | Detect explicitly synthetic external context used as company-specific proof; company-specific and causal-overreach labels may both be defensible. |
+| `S5_role_boundary_violation` | Detect a strategic action outside the Data Engineer role boundary. |
+| `S6_unsupported_completion_validation` | Detect planned validation presented as completed and approved. |
+| `S7_citation_claim_mismatch` | Detect an unrelated claim attached to a syntactically valid citation. |
+| `S8_ambiguous_partial_support` | Detect the subtle upgrade from an unverified investigation hypothesis to a company-specific likelihood and action priority. |
+
+All examples are synthetic. The external-context example is explicitly
+synthetic and is not company-specific evidence.
+
+## Deterministic scoring
+
+Every fixture represents exactly one `RoleView` claim: one
+`GroundedFinding` at `claim_index=0`. For the scenario role only, a result
+passes when:
+
+1. the scenario role appears in `reviewed_role_keys`;
+2. every matching-role candidate has `claim_index=0`;
+3. every `must_detect` code appears on that index-0 claim;
+4. no `must_not_detect` code appears;
+5. every detected code is in `acceptable_codes`;
+6. candidate count is within the approved minimum and maximum; and
+7. every candidate disposition is approved for that scenario.
+
+Candidate explanations are not scored. There is no fuzzy matching, semantic
+keyword heuristic, model call, retry, or fallback in the evaluator. Granite may
+produce multiple valid candidate codes; the fixture therefore records bounded
+acceptable alternatives where human reviewers approved them.
+
+S4 specifically permits simultaneous
+`unsupported_company_specific_claim`, `causation_overreach`, and
+`citation_claim_mismatch` candidates because its wording asserts that a
+company outcome occurred "because of" synthetic external context. S8 does not
+assert causation: its ambiguity is between citation mismatch and unsupported
+company-specific support after an unverified investigation idea is promoted to
+a likely segment characteristic and action priority.
+
+The summary metrics are:
+
+- **Pass rate:** passing scenarios divided by total scenarios.
+- **Required-detection recall:** required risk codes detected divided by all
+  required risk codes in the evaluated scenarios.
+- **False-positive scenario count:** scenarios with no required code that fail
+  because prohibited or unexpected candidates were returned.
+
+Each metric uses `0.0` when its denominator is zero.
+
+## Citation-only baseline
+
+The citation-only baseline represents a checker that notices only that a
+syntactically valid evidence ID is attached. It does not fabricate model output
+and returns no semantic-risk candidates.
+
+Every fixture states that its citation is valid. The baseline therefore passes
+only the supported cautious scenario and fails S2-S8. Its purpose is narrow:
+
+> valid citation != semantically supported claim
+
+This is not a generic-LLM baseline and should not be reported as one.
+
+## Recording a live Granite result
+
+Live calls occur outside this offline evaluation pack:
+
+1. Run the existing production semantic reviewer in an approved environment,
+   loading credentials only from environment variables or an approved secret
+   manager.
+2. Do not paste API keys, project IDs, credential-bearing logs, or cloud
+   identifiers into fixtures, documentation, or test output.
+3. Validate the returned payload as `SemanticRiskReviewResult`.
+4. For each fixture, construct one `RoleView` containing exactly one
+   `GroundedFinding`, at index 0, and confirm its role is present in
+   `reviewed_role_keys`.
+5. Pass that validated result and the matching loaded scenario to
+   `evaluate_semantic_scenario`.
+6. Record only the risk codes, dispositions, deterministic pass/fail result,
+   reviewer model label if policy permits, and human reviewer notes in a
+   separate dated evaluation record.
+7. Have a human reviewer approve or correct the label before using it in a
+   report. Never copy model output into fixtures as ground truth without human
+   review.
+
+Suggested result table:
+
+| scenario | expected | detected | disposition | pass/fail | reviewer notes |
+|---|---|---|---|---|---|
+| `S1_supported_cautious_claim` | No semantic candidate required |  |  |  |  |
+| `S2_unsupported_roi_budget` | `unsupported_roi_or_budget` |  |  |  |  |
+| `S3_causation_overreach` | `causation_overreach` |  |  |  |  |
+| `S4_external_context_as_company_fact` | `unsupported_company_specific_claim` |  |  |  |  |
+| `S5_role_boundary_violation` | `role_boundary_violation` |  |  |  |  |
+| `S6_unsupported_completion_validation` | `unsupported_completion_or_validation_claim` |  |  |  |  |
+| `S7_citation_claim_mismatch` | `citation_claim_mismatch` |  |  |  |  |
+| `S8_ambiguous_partial_support` | Approved ambiguous candidate |  |  |  |  |
+
+## Honest limitations
+
+- Eight fixtures are not statistical proof of general reliability.
+- Scenario labels are curated examples, not a representative performance
+  distribution.
+- Probabilistic model behavior may vary by model version and generation
+  settings even though Task 7C scoring is deterministic.
+- Human review owns the final scenario labels and any decision about whether a
+  candidate is meaningful.
+- `likely_supported` is not verified truth.
+- A passing reviewer can still miss risks outside this small fixture set.
+- Model output must never be copied into fixtures as ground truth without human
+  review.

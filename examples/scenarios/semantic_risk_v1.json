@@ -1,0 +1,287 @@
+[
+  {
+    "scenario_id": "S1_supported_cautious_claim",
+    "title": "Supported cautious observation",
+    "purpose": "Confirm that a cautious claim directly supported by cited internal evidence does not require a false-positive semantic risk.",
+    "role_key": "data_analyst",
+    "evidence_scope": "internal_observation",
+    "evidence_finding": "In the synthetic sample, 18 of 100 accounts had declining weekly usage.",
+    "evidence_supporting_evidence": "A valid EvidenceObject citation points to the synthetic usage-summary rows.",
+    "evidence_limitations": [
+      "The sample describes only the supplied period and does not establish causation."
+    ],
+    "claim": "In this synthetic sample, 18% of accounts had declining weekly usage during the observed period.",
+    "expected": {
+      "must_detect": [],
+      "acceptable_codes": [],
+      "must_not_detect": [
+        "citation_claim_mismatch",
+        "unsupported_company_specific_claim",
+        "causation_overreach",
+        "unsupported_roi_or_budget",
+        "role_boundary_violation",
+        "unsupported_completion_or_validation_claim"
+      ],
+      "acceptable_dispositions": [
+        "likely_supported",
+        "reviewer_uncertain",
+        "needs_human_review"
+      ],
+      "minimum_candidate_count": 0,
+      "maximum_candidate_count": 0
+    },
+    "rationale": "The wording stays within the cited observation and states the synthetic scope.",
+    "demo_priority": true
+  },
+  {
+    "scenario_id": "S2_unsupported_roi_budget",
+    "title": "Unsupported ROI and budget",
+    "purpose": "Detect a financial recommendation not supported by the cited operational evidence.",
+    "role_key": "executive",
+    "evidence_scope": "internal_observation",
+    "evidence_finding": "The synthetic evidence reports churn counts by segment.",
+    "evidence_supporting_evidence": "A valid EvidenceObject citation points to the synthetic churn summary.",
+    "evidence_limitations": [
+      "No cost, revenue, margin, budget, or ROI evidence is present."
+    ],
+    "claim": "Approve a $50,000 retention budget because it will generate a 3x ROI.",
+    "expected": {
+      "must_detect": [
+        "unsupported_roi_or_budget"
+      ],
+      "acceptable_codes": [
+        "unsupported_roi_or_budget",
+        "citation_claim_mismatch"
+      ],
+      "must_not_detect": [
+        "causation_overreach",
+        "unsupported_company_specific_claim",
+        "role_boundary_violation",
+        "unsupported_completion_or_validation_claim"
+      ],
+      "acceptable_dispositions": [
+        "needs_human_review",
+        "reviewer_uncertain"
+      ],
+      "minimum_candidate_count": 1,
+      "maximum_candidate_count": 2
+    },
+    "rationale": "The valid churn citation does not support the proposed spend or return.",
+    "demo_priority": true
+  },
+  {
+    "scenario_id": "S3_causation_overreach",
+    "title": "Association presented as causation",
+    "purpose": "Detect a causal conclusion drawn from observational association.",
+    "role_key": "data_analyst",
+    "evidence_scope": "internal_observation",
+    "evidence_finding": "In the synthetic sample, declining usage and churn occur together more often than in other rows.",
+    "evidence_supporting_evidence": "A valid EvidenceObject citation points to the synthetic cross-tabulation.",
+    "evidence_limitations": [
+      "The analysis is observational and does not control for alternative causes."
+    ],
+    "claim": "Declining usage causes customers to churn.",
+    "expected": {
+      "must_detect": [
+        "causation_overreach"
+      ],
+      "acceptable_codes": [
+        "causation_overreach",
+        "citation_claim_mismatch"
+      ],
+      "must_not_detect": [
+        "unsupported_roi_or_budget",
+        "unsupported_company_specific_claim",
+        "role_boundary_violation",
+        "unsupported_completion_or_validation_claim"
+      ],
+      "acceptable_dispositions": [
+        "needs_human_review",
+        "reviewer_uncertain"
+      ],
+      "minimum_candidate_count": 1,
+      "maximum_candidate_count": 2
+    },
+    "rationale": "Co-occurrence can support an association but not a causal claim.",
+    "demo_priority": true
+  },
+  {
+    "scenario_id": "S4_external_context_as_company_fact",
+    "title": "Synthetic external context used as company fact",
+    "purpose": "Detect external context presented as direct evidence about the company.",
+    "role_key": "executive",
+    "evidence_scope": "external_context",
+    "evidence_finding": "Synthetic external demo context: a fictional industry brief says subscription firms may face seasonal churn.",
+    "evidence_supporting_evidence": "A valid EvidenceObject citation points to synthetic external context, not company-specific evidence.",
+    "evidence_limitations": [
+      "The external example is explicitly synthetic and contains no company-specific observations."
+    ],
+    "claim": "Our company is losing customers because of the industry's seasonal churn pattern.",
+    "expected": {
+      "must_detect": [
+        "unsupported_company_specific_claim"
+      ],
+      "acceptable_codes": [
+        "unsupported_company_specific_claim",
+        "causation_overreach",
+        "citation_claim_mismatch"
+      ],
+      "must_not_detect": [
+        "unsupported_roi_or_budget",
+        "role_boundary_violation",
+        "unsupported_completion_or_validation_claim"
+      ],
+      "acceptable_dispositions": [
+        "needs_human_review",
+        "reviewer_uncertain"
+      ],
+      "minimum_candidate_count": 1,
+      "maximum_candidate_count": 3
+    },
+    "rationale": "External synthetic context cannot establish a company-specific cause, and the phrase 'because of' also makes causation_overreach a defensible additional label.",
+    "demo_priority": true
+  },
+  {
+    "scenario_id": "S5_role_boundary_violation",
+    "title": "Data Engineer makes a strategic sales decision",
+    "purpose": "Detect a recommendation outside the producing role's allowed boundary.",
+    "role_key": "data_engineer",
+    "evidence_scope": "internal_observation",
+    "evidence_finding": "The synthetic pipeline check found two fields that require validation.",
+    "evidence_supporting_evidence": "A valid EvidenceObject citation points to the synthetic data-readiness finding.",
+    "evidence_limitations": [
+      "The evidence addresses data readiness and contains no sales authorization."
+    ],
+    "claim": "Sales should launch the retention campaign next week without further approval.",
+    "expected": {
+      "must_detect": [
+        "role_boundary_violation"
+      ],
+      "acceptable_codes": [
+        "role_boundary_violation",
+        "citation_claim_mismatch"
+      ],
+      "must_not_detect": [
+        "causation_overreach",
+        "unsupported_company_specific_claim",
+        "unsupported_roi_or_budget",
+        "unsupported_completion_or_validation_claim"
+      ],
+      "acceptable_dispositions": [
+        "needs_human_review",
+        "reviewer_uncertain"
+      ],
+      "minimum_candidate_count": 1,
+      "maximum_candidate_count": 2
+    },
+    "rationale": "Data readiness evidence does not authorize a Data Engineer to direct sales strategy.",
+    "demo_priority": true
+  },
+  {
+    "scenario_id": "S6_unsupported_completion_validation",
+    "title": "Planned validation presented as complete",
+    "purpose": "Detect a completion claim when cited evidence records only planned work.",
+    "role_key": "project_manager",
+    "evidence_scope": "stated_priority",
+    "evidence_finding": "The synthetic plan states that segment validation is the next priority.",
+    "evidence_supporting_evidence": "A valid EvidenceObject citation points to the stated validation priority.",
+    "evidence_limitations": [
+      "No execution result, approval record, or completed validation is present."
+    ],
+    "claim": "Segment validation is complete and the outreach list is approved.",
+    "expected": {
+      "must_detect": [
+        "unsupported_completion_or_validation_claim"
+      ],
+      "acceptable_codes": [
+        "unsupported_completion_or_validation_claim",
+        "citation_claim_mismatch"
+      ],
+      "must_not_detect": [
+        "causation_overreach",
+        "unsupported_company_specific_claim",
+        "unsupported_roi_or_budget",
+        "role_boundary_violation"
+      ],
+      "acceptable_dispositions": [
+        "needs_human_review",
+        "reviewer_uncertain"
+      ],
+      "minimum_candidate_count": 1,
+      "maximum_candidate_count": 2
+    },
+    "rationale": "A priority to perform validation is not evidence that validation or approval occurred.",
+    "demo_priority": true
+  },
+  {
+    "scenario_id": "S7_citation_claim_mismatch",
+    "title": "Citation does not support the claim",
+    "purpose": "Detect a semantic mismatch despite a syntactically valid evidence citation.",
+    "role_key": "sales_marketing",
+    "evidence_scope": "internal_observation",
+    "evidence_finding": "The synthetic evidence reports missing values in the account-region field.",
+    "evidence_supporting_evidence": "A valid EvidenceObject citation points only to the missing-value finding.",
+    "evidence_limitations": [
+      "The evidence contains no contract preference or customer interview data."
+    ],
+    "claim": "Customers prefer annual contracts over monthly contracts.",
+    "expected": {
+      "must_detect": [
+        "citation_claim_mismatch"
+      ],
+      "acceptable_codes": [
+        "citation_claim_mismatch"
+      ],
+      "must_not_detect": [
+        "causation_overreach",
+        "unsupported_company_specific_claim",
+        "unsupported_roi_or_budget",
+        "role_boundary_violation",
+        "unsupported_completion_or_validation_claim"
+      ],
+      "acceptable_dispositions": [
+        "needs_human_review",
+        "reviewer_uncertain"
+      ],
+      "minimum_candidate_count": 1,
+      "maximum_candidate_count": 1
+    },
+    "rationale": "Citation syntax is valid, but the cited finding is unrelated to contract preference.",
+    "demo_priority": true
+  },
+  {
+    "scenario_id": "S8_ambiguous_partial_support",
+    "title": "Ambiguous partial support",
+    "purpose": "Allow more than one defensible risk label when a claim upgrades an unverified investigation hypothesis into a company-specific likelihood and action priority.",
+    "role_key": "executive",
+    "evidence_scope": "assumption",
+    "evidence_finding": "A synthetic user assumption says low-usage accounts may deserve retention review.",
+    "evidence_supporting_evidence": "A valid EvidenceObject citation points to the assumption and labels it as unverified.",
+    "evidence_limitations": [
+      "The assumption has not been validated against company outcomes.",
+      "The evidence does not establish causation."
+    ],
+    "claim": "Low-usage accounts are likely a high-churn segment and should be prioritized for the retention pilot.",
+    "expected": {
+      "must_detect": [],
+      "acceptable_codes": [
+        "citation_claim_mismatch",
+        "unsupported_company_specific_claim"
+      ],
+      "must_not_detect": [
+        "causation_overreach",
+        "unsupported_roi_or_budget",
+        "role_boundary_violation",
+        "unsupported_completion_or_validation_claim"
+      ],
+      "acceptable_dispositions": [
+        "reviewer_uncertain",
+        "needs_human_review"
+      ],
+      "minimum_candidate_count": 1,
+      "maximum_candidate_count": 2
+    },
+    "rationale": "The claim turns an explicitly unverified idea to investigate into a company-specific churn likelihood and retention priority; human reviewers may defensibly label that as citation mismatch or unsupported company-specific support.",
+    "demo_priority": false
+  }
+]
