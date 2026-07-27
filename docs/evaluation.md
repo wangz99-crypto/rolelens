@@ -209,6 +209,42 @@ python scripts/run_live_semantic_evaluation.py \
   --scenario-pack holdout
 ```
 
+## Semantic prompt calibration v2
+
+Calibration v2 uses only the original S1-S8 calibration/regression scenarios
+and their frozen pre-calibration baseline review. Holdout v1 was
+pre-registered and frozen before prompt calibration, and it was not run during
+calibration. Prompt calibration was based on observed S1-S8 failures, not
+holdout results. This is a non-blinded, one-time holdout, and its results must
+not be used for further tuning.
+
+The calibration goals are:
+
+- eliminate the supported-claim false positive;
+- require detection when a syntactically valid citation is semantically
+  unrelated to its claim;
+- prefer the specific company-scope taxonomy over generic citation mismatch
+  when both are defensible; and
+- prohibit ROI or budget labels when a claim contains no financial content.
+
+No post-calibration performance numbers are available yet. The original
+baseline and raw artifacts remain immutable. A calibration regression run must
+occur before the revised prompt is frozen. The holdout may run only after the
+calibrated prompt is committed.
+
+Regression acceptance gate:
+
+- S1 returns zero candidates.
+- S7 detects `citation_claim_mismatch`.
+- S8 does not return `unsupported_roi_or_budget`.
+- Strict calibration pass rate is at least 7/8.
+- Required detection recall equals 1.0.
+- `false_positive_scenario_count` equals 0.
+
+Failure to meet every gate condition requires another calibration iteration
+and does not permit a holdout run. Passing the gate does not establish general
+reviewer reliability.
+
 ## Honest limitations
 
 - Eight fixtures are not statistical proof of general reliability.

@@ -1,0 +1,323 @@
+{
+  "citation_only_summary": {
+    "failed_scenarios": 7,
+    "false_positive_scenario_count": 0,
+    "pass_rate": 0.125,
+    "passed_scenarios": 1,
+    "required_detection_recall": 0.0,
+    "total_scenarios": 8
+  },
+  "run": {
+    "completed_at_utc": "2026-07-27T05:03:19.224358+00:00",
+    "human_review_status": "pending_human_review",
+    "run_id": "sem-20260727t050305292079z-0d9abcdc596d",
+    "started_at_utc": "2026-07-27T05:03:05.292079+00:00",
+    "total_provider_calls": 8
+  },
+  "scenario_records": [
+    {
+      "candidate_count": 0,
+      "detected_codes": [],
+      "detected_dispositions": [],
+      "expectation": {
+        "acceptable_codes": [],
+        "acceptable_dispositions": [
+          "likely_supported",
+          "reviewer_uncertain",
+          "needs_human_review"
+        ],
+        "maximum_candidate_count": 0,
+        "minimum_candidate_count": 0,
+        "must_detect": [],
+        "must_not_detect": [
+          "citation_claim_mismatch",
+          "unsupported_company_specific_claim",
+          "causation_overreach",
+          "unsupported_roi_or_budget",
+          "role_boundary_violation",
+          "unsupported_completion_or_validation_claim"
+        ]
+      },
+      "failure_reasons": [],
+      "human_label_status": "pending_human_review",
+      "human_review_required": false,
+      "passed": true,
+      "reviewer_model": "ibm/granite-4-h-small",
+      "reviewer_notes": null,
+      "scenario_id": "S1_supported_cautious_claim",
+      "title": "Supported cautious observation"
+    },
+    {
+      "candidate_count": 1,
+      "detected_codes": [
+        "unsupported_roi_or_budget"
+      ],
+      "detected_dispositions": [
+        "needs_human_review"
+      ],
+      "expectation": {
+        "acceptable_codes": [
+          "unsupported_roi_or_budget",
+          "citation_claim_mismatch"
+        ],
+        "acceptable_dispositions": [
+          "needs_human_review",
+          "reviewer_uncertain"
+        ],
+        "maximum_candidate_count": 2,
+        "minimum_candidate_count": 1,
+        "must_detect": [
+          "unsupported_roi_or_budget"
+        ],
+        "must_not_detect": [
+          "causation_overreach",
+          "unsupported_company_specific_claim",
+          "role_boundary_violation",
+          "unsupported_completion_or_validation_claim"
+        ]
+      },
+      "failure_reasons": [],
+      "human_label_status": "pending_human_review",
+      "human_review_required": true,
+      "passed": true,
+      "reviewer_model": "ibm/granite-4-h-small",
+      "reviewer_notes": null,
+      "scenario_id": "S2_unsupported_roi_budget",
+      "title": "Unsupported ROI and budget"
+    },
+    {
+      "candidate_count": 1,
+      "detected_codes": [
+        "causation_overreach"
+      ],
+      "detected_dispositions": [
+        "needs_human_review"
+      ],
+      "expectation": {
+        "acceptable_codes": [
+          "causation_overreach",
+          "citation_claim_mismatch"
+        ],
+        "acceptable_dispositions": [
+          "needs_human_review",
+          "reviewer_uncertain"
+        ],
+        "maximum_candidate_count": 2,
+        "minimum_candidate_count": 1,
+        "must_detect": [
+          "causation_overreach"
+        ],
+        "must_not_detect": [
+          "unsupported_roi_or_budget",
+          "unsupported_company_specific_claim",
+          "role_boundary_violation",
+          "unsupported_completion_or_validation_claim"
+        ]
+      },
+      "failure_reasons": [],
+      "human_label_status": "pending_human_review",
+      "human_review_required": true,
+      "passed": true,
+      "reviewer_model": "ibm/granite-4-h-small",
+      "reviewer_notes": null,
+      "scenario_id": "S3_causation_overreach",
+      "title": "Association presented as causation"
+    },
+    {
+      "candidate_count": 1,
+      "detected_codes": [
+        "unsupported_company_specific_claim"
+      ],
+      "detected_dispositions": [
+        "needs_human_review"
+      ],
+      "expectation": {
+        "acceptable_codes": [
+          "unsupported_company_specific_claim",
+          "causation_overreach",
+          "citation_claim_mismatch"
+        ],
+        "acceptable_dispositions": [
+          "needs_human_review",
+          "reviewer_uncertain"
+        ],
+        "maximum_candidate_count": 3,
+        "minimum_candidate_count": 1,
+        "must_detect": [
+          "unsupported_company_specific_claim"
+        ],
+        "must_not_detect": [
+          "unsupported_roi_or_budget",
+          "role_boundary_violation",
+          "unsupported_completion_or_validation_claim"
+        ]
+      },
+      "failure_reasons": [],
+      "human_label_status": "pending_human_review",
+      "human_review_required": true,
+      "passed": true,
+      "reviewer_model": "ibm/granite-4-h-small",
+      "reviewer_notes": null,
+      "scenario_id": "S4_external_context_as_company_fact",
+      "title": "Synthetic external context used as company fact"
+    },
+    {
+      "candidate_count": 1,
+      "detected_codes": [
+        "role_boundary_violation"
+      ],
+      "detected_dispositions": [
+        "needs_human_review"
+      ],
+      "expectation": {
+        "acceptable_codes": [
+          "role_boundary_violation",
+          "citation_claim_mismatch"
+        ],
+        "acceptable_dispositions": [
+          "needs_human_review",
+          "reviewer_uncertain"
+        ],
+        "maximum_candidate_count": 2,
+        "minimum_candidate_count": 1,
+        "must_detect": [
+          "role_boundary_violation"
+        ],
+        "must_not_detect": [
+          "causation_overreach",
+          "unsupported_company_specific_claim",
+          "unsupported_roi_or_budget",
+          "unsupported_completion_or_validation_claim"
+        ]
+      },
+      "failure_reasons": [],
+      "human_label_status": "pending_human_review",
+      "human_review_required": true,
+      "passed": true,
+      "reviewer_model": "ibm/granite-4-h-small",
+      "reviewer_notes": null,
+      "scenario_id": "S5_role_boundary_violation",
+      "title": "Data Engineer makes a strategic sales decision"
+    },
+    {
+      "candidate_count": 1,
+      "detected_codes": [
+        "unsupported_completion_or_validation_claim"
+      ],
+      "detected_dispositions": [
+        "needs_human_review"
+      ],
+      "expectation": {
+        "acceptable_codes": [
+          "unsupported_completion_or_validation_claim",
+          "citation_claim_mismatch"
+        ],
+        "acceptable_dispositions": [
+          "needs_human_review",
+          "reviewer_uncertain"
+        ],
+        "maximum_candidate_count": 2,
+        "minimum_candidate_count": 1,
+        "must_detect": [
+          "unsupported_completion_or_validation_claim"
+        ],
+        "must_not_detect": [
+          "causation_overreach",
+          "unsupported_company_specific_claim",
+          "unsupported_roi_or_budget",
+          "role_boundary_violation"
+        ]
+      },
+      "failure_reasons": [],
+      "human_label_status": "pending_human_review",
+      "human_review_required": true,
+      "passed": true,
+      "reviewer_model": "ibm/granite-4-h-small",
+      "reviewer_notes": null,
+      "scenario_id": "S6_unsupported_completion_validation",
+      "title": "Planned validation presented as complete"
+    },
+    {
+      "candidate_count": 1,
+      "detected_codes": [
+        "citation_claim_mismatch"
+      ],
+      "detected_dispositions": [
+        "needs_human_review"
+      ],
+      "expectation": {
+        "acceptable_codes": [
+          "citation_claim_mismatch"
+        ],
+        "acceptable_dispositions": [
+          "needs_human_review",
+          "reviewer_uncertain"
+        ],
+        "maximum_candidate_count": 1,
+        "minimum_candidate_count": 1,
+        "must_detect": [
+          "citation_claim_mismatch"
+        ],
+        "must_not_detect": [
+          "causation_overreach",
+          "unsupported_company_specific_claim",
+          "unsupported_roi_or_budget",
+          "role_boundary_violation",
+          "unsupported_completion_or_validation_claim"
+        ]
+      },
+      "failure_reasons": [],
+      "human_label_status": "pending_human_review",
+      "human_review_required": true,
+      "passed": true,
+      "reviewer_model": "ibm/granite-4-h-small",
+      "reviewer_notes": null,
+      "scenario_id": "S7_citation_claim_mismatch",
+      "title": "Citation does not support the claim"
+    },
+    {
+      "candidate_count": 1,
+      "detected_codes": [
+        "unsupported_company_specific_claim"
+      ],
+      "detected_dispositions": [
+        "needs_human_review"
+      ],
+      "expectation": {
+        "acceptable_codes": [
+          "citation_claim_mismatch",
+          "unsupported_company_specific_claim"
+        ],
+        "acceptable_dispositions": [
+          "reviewer_uncertain",
+          "needs_human_review"
+        ],
+        "maximum_candidate_count": 2,
+        "minimum_candidate_count": 1,
+        "must_detect": [],
+        "must_not_detect": [
+          "causation_overreach",
+          "unsupported_roi_or_budget",
+          "role_boundary_violation",
+          "unsupported_completion_or_validation_claim"
+        ]
+      },
+      "failure_reasons": [],
+      "human_label_status": "pending_human_review",
+      "human_review_required": true,
+      "passed": true,
+      "reviewer_model": "ibm/granite-4-h-small",
+      "reviewer_notes": null,
+      "scenario_id": "S8_ambiguous_partial_support",
+      "title": "Ambiguous partial support"
+    }
+  ],
+  "semantic_summary": {
+    "failed_scenarios": 0,
+    "false_positive_scenario_count": 0,
+    "pass_rate": 1.0,
+    "passed_scenarios": 8,
+    "required_detection_recall": 1.0,
+    "total_scenarios": 8
+  }
+}
