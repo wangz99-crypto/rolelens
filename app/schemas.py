@@ -1663,3 +1663,280 @@ class SemanticRiskReviewResult(ContractModel):
                 f"({expected_review!r})"
             )
         return self
+
+
+# ---------------------------------------------------------------------------
+# Task 8A — deterministic Workflow Planner contracts
+# ---------------------------------------------------------------------------
+
+_WORKFLOW_STEP_ID_RE = re.compile(r"^wf-[0-9]{3}$")
+
+
+class WorkflowStepKind(str, Enum):
+    """Machine keys for the three deterministic workflow step kinds."""
+
+    deterministic_risk_resolution = "deterministic_risk_resolution"
+    semantic_review_gate = "semantic_review_gate"
+    role_action = "role_action"
+
+
+class WorkflowStepStatus(str, Enum):
+    """Current review readiness of a generated workflow step."""
+
+    ready = "ready"
+    blocked = "blocked"
+    pending_human_review = "pending_human_review"
+
+
+class WorkflowPlanStatus(str, Enum):
+    """Derived aggregate status for a deterministic workflow plan."""
+
+    blocked = "blocked"
+    ready_for_human_review = "ready_for_human_review"
+    no_actionable_steps = "no_actionable_steps"
+
+
+class WorkflowStep(ContractModel):
+    """One immutable, evidence-grounded step in a deterministic workflow."""
+
+    step_id: str
+    sequence: int = Field(..., ge=1)
+    step_kind: WorkflowStepKind
+    owner_role: RoleKey
+    action: str
+    supporting_evidence_ids: list[str]
+    dependency_step_ids: list[str]
+    dependency_notes: list[str]
+    missing_information: list[str]
+    deterministic_risk_codes: list[RiskCode]
+    semantic_risk_codes: list[SemanticRiskCode]
+    review_questions: list[str]
+    status: WorkflowStepStatus
+    blocks_downstream: bool
+    human_review_required: bool
+
+    @field_validator("step_id")
+    @classmethod
+    def step_id_format(cls, value: str) -> str:
+        """Require the stable ``wf-NNN`` step identifier format."""
+        if not _WORKFLOW_STEP_ID_RE.fullmatch(value):
+            raise ValueError("step_id must match wf-[0-9]{3}")
+        return value
+
+    @field_validator("action")
+    @classmethod
+    def action_non_blank(cls, value: str) -> str:
+        """Reject blank executable action text."""
+        if not value or not value.strip():
+            raise ValueError("action must not be blank")
+        return value
+
+    @field_validator("supporting_evidence_ids")
+    @classmethod
+    def supporting_evidence_ids_valid_unique(
+        cls,
+        values: list[str],
+    ) -> list[str]:
+        """Require valid, duplicate-free Evidence Object identifiers."""
+        for evidence_id in values:
+            _validate_evidence_id(evidence_id)
+        if len(values) != len(set(values)):
+            raise ValueError(
+                "supporting_evidence_ids must not contain duplicates"
+            )
+        return values
+
+    @field_validator("dependency_step_ids")
+    @classmethod
+    def dependency_step_ids_valid_unique(
+        cls,
+        values: list[str],
+    ) -> list[str]:
+        """Require valid, duplicate-free workflow dependency identifiers."""
+        if any(not _WORKFLOW_STEP_ID_RE.fullmatch(value) for value in values):
+            raise ValueError(
+                "dependency_step_ids values must match wf-[0-9]{3}"
+            )
+        if len(values) != len(set(values)):
+            raise ValueError(
+                "dependency_step_ids must not contain duplicates"
+            )
+        return values
+
+    @field_validator(
+        "dependency_notes",
+        "missing_information",
+        "review_questions",
+    )
+    @classmethod
+    def string_lists_non_blank_unique(
+        cls,
+        values: list[str],
+        info: Any,
+    ) -> list[str]:
+        """Reject blank or duplicate free-text list values."""
+        _validate_str_list_no_blank_or_dup(values, info.field_name)
+        return values
+
+    @field_validator("deterministic_risk_codes", "semantic_risk_codes")
+    @classmethod
+    def risk_code_lists_unique(
+        cls,
+        values: list[Any],
+        info: Any,
+    ) -> list[Any]:
+        """Reject repeated typed risk codes within one step."""
+        if len(values) != len(set(values)):
+            raise ValueError(f"{info.field_name} must not contain duplicates")
+        return values
+
+    @model_validator(mode="after")
+    def step_kind_contract(self) -> "WorkflowStep":
+        """Enforce self-dependency and step-kind cross-field invariants."""
+        if self.step_id in self.dependency_step_ids:
+            raise ValueError("a workflow step cannot depend on itself")
+
+        if self.step_kind == WorkflowStepKind.semantic_review_gate:
+            if not self.semantic_risk_codes:
+                raise ValueError(
+                    "semantic_review_gate requires semantic_risk_codes"
+                )
+            if not self.review_questions:
+                raise ValueError(
+                    "semantic_review_gate requires review_questions"
+                )
+            if self.deterministic_risk_codes:
+                raise ValueError(
+                    "semantic_review_gate requires empty "
+                    "deterministic_risk_codes"
+                )
+            if self.status != WorkflowStepStatus.pending_human_review:
+                raise ValueError(
+                    "semantic_review_gate status must be pending_human_review"
+                )
+            if self.blocks_downstream:
+                raise ValueError(
+                    "semantic_review_gate cannot block downstream steps"
+                )
+            if not self.human_review_required:
+                raise ValueError(
+                    "semantic_review_gate requires human review"
+                )
+
+        if (
+            self.step_kind
+            == WorkflowStepKind.deterministic_risk_resolution
+        ):
+            if not self.deterministic_risk_codes:
+                raise ValueError(
+                    "deterministic_risk_resolution requires "
+                    "deterministic_risk_codes"
+                )
+            if self.semantic_risk_codes or self.review_questions:
+                raise ValueError(
+                    "deterministic_risk_resolution requires empty semantic "
+                    "risk codes and review questions"
+                )
+        return self
+
+
+class WorkflowPlan(ContractModel):
+    """Complete deterministic V1 workflow plan."""
+
+    steps: list[WorkflowStep]
+    plan_status: WorkflowPlanStatus
+    included_role_keys: list[RoleKey]
+    blocking_step_ids: list[str]
+    human_review_required: bool
+    planning_method: Literal["deterministic_v1"]
+
+    @field_validator("included_role_keys")
+    @classmethod
+    def included_roles_fixed_order_unique(
+        cls,
+        values: list[RoleKey],
+    ) -> list[RoleKey]:
+        """Require a unique subsequence of the canonical role order."""
+        if len(values) != len(set(values)):
+            raise ValueError("included_role_keys must not contain duplicates")
+        expected = [
+            role_key
+            for role_key in _ROLE_EXECUTION_ORDER
+            if role_key in set(values)
+        ]
+        if values != expected:
+            raise ValueError(
+                "included_role_keys must preserve fixed role execution order"
+            )
+        return values
+
+    @field_validator("blocking_step_ids")
+    @classmethod
+    def blocking_ids_valid_unique(cls, values: list[str]) -> list[str]:
+        """Require valid, duplicate-free blocking step identifiers."""
+        if any(not _WORKFLOW_STEP_ID_RE.fullmatch(value) for value in values):
+            raise ValueError(
+                "blocking_step_ids values must match wf-[0-9]{3}"
+            )
+        if len(values) != len(set(values)):
+            raise ValueError("blocking_step_ids must not contain duplicates")
+        return values
+
+    @model_validator(mode="after")
+    def plan_consistency(self) -> "WorkflowPlan":
+        """Validate sequence, dependencies, blockers, and derived flags."""
+        step_ids = [step.step_id for step in self.steps]
+        if len(step_ids) != len(set(step_ids)):
+            raise ValueError("WorkflowStep IDs must be unique")
+
+        expected_sequences = list(range(1, len(self.steps) + 1))
+        if [step.sequence for step in self.steps] != expected_sequences:
+            raise ValueError(
+                "WorkflowStep sequence values must be contiguous from 1"
+            )
+        expected_ids = [
+            f"wf-{sequence:03d}" for sequence in expected_sequences
+        ]
+        if step_ids != expected_ids:
+            raise ValueError(
+                "WorkflowStep IDs must correspond exactly to sequence values"
+            )
+
+        sequence_by_id = {
+            step.step_id: step.sequence for step in self.steps
+        }
+        for step in self.steps:
+            for dependency_id in step.dependency_step_ids:
+                dependency_sequence = sequence_by_id.get(dependency_id)
+                if dependency_sequence is None:
+                    raise ValueError(
+                        "dependency_step_ids must reference existing steps"
+                    )
+                if dependency_sequence >= step.sequence:
+                    raise ValueError(
+                        "dependencies must reference earlier workflow steps"
+                    )
+
+        expected_blocking_ids = [
+            step.step_id for step in self.steps if step.blocks_downstream
+        ]
+        if self.blocking_step_ids != expected_blocking_ids:
+            raise ValueError(
+                "blocking_step_ids must exactly match blocking workflow steps"
+            )
+
+        if not self.steps:
+            expected_status = WorkflowPlanStatus.no_actionable_steps
+        elif self.blocking_step_ids:
+            expected_status = WorkflowPlanStatus.blocked
+        else:
+            expected_status = WorkflowPlanStatus.ready_for_human_review
+        if self.plan_status != expected_status:
+            raise ValueError(
+                "plan_status is inconsistent with steps and blocking_step_ids"
+            )
+        if not self.human_review_required:
+            raise ValueError(
+                "WorkflowPlan.human_review_required must always be true"
+            )
+        return self
