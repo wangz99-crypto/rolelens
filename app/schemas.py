@@ -1940,3 +1940,378 @@ class WorkflowPlan(ContractModel):
                 "WorkflowPlan.human_review_required must always be true"
             )
         return self
+
+
+# ---------------------------------------------------------------------------
+# Task 9A — deterministic simulated Human Review Ledger contracts
+# ---------------------------------------------------------------------------
+
+
+class HumanReviewDecision(str, Enum):
+    """Simulated memo-review decision for one immutable workflow step."""
+
+    accept = "accept"
+    reject = "reject"
+    revise = "revise"
+
+
+class HumanReviewSessionStatus(str, Enum):
+    """Completion state of a simulated human-review session."""
+
+    pending = "pending"
+    complete = "complete"
+
+
+class HumanReviewStepInput(ContractModel):
+    """One caller-supplied simulated human decision."""
+
+    decision: HumanReviewDecision
+    reviewer_note: str | None = None
+    revised_action: str | None = None
+
+    @field_validator("reviewer_note", "revised_action")
+    @classmethod
+    def optional_text_non_blank(
+        cls,
+        value: str | None,
+        info: Any,
+    ) -> str | None:
+        """Reject blank text whenever an optional text field is supplied."""
+        if value is not None and (not value or not value.strip()):
+            raise ValueError(f"{info.field_name} must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def decision_fields_are_consistent(self) -> "HumanReviewStepInput":
+        """Enforce accept, reject, and revise input combinations."""
+        if self.decision == HumanReviewDecision.accept:
+            if self.revised_action is not None:
+                raise ValueError("accept requires revised_action=None")
+        elif self.decision == HumanReviewDecision.reject:
+            if self.reviewer_note is None:
+                raise ValueError("reject requires reviewer_note")
+            if self.revised_action is not None:
+                raise ValueError("reject requires revised_action=None")
+        else:
+            if self.reviewer_note is None:
+                raise ValueError("revise requires reviewer_note")
+            if self.revised_action is None:
+                raise ValueError("revise requires revised_action")
+        return self
+
+
+class HumanReviewedStep(ContractModel):
+    """Immutable snapshot of one reviewed WorkflowStep and its decision."""
+
+    step_id: str
+    sequence: int = Field(..., ge=1)
+    step_kind: WorkflowStepKind
+    owner_role: RoleKey
+    original_action: str
+    final_action: str | None
+    decision: HumanReviewDecision
+    reviewer_note: str | None
+    supporting_evidence_ids: list[str]
+    deterministic_risk_codes: list[RiskCode]
+    semantic_risk_codes: list[SemanticRiskCode]
+    original_status: WorkflowStepStatus
+    blocks_downstream: bool
+    revision_requires_revalidation: bool
+
+    @field_validator("step_id")
+    @classmethod
+    def step_id_format(cls, value: str) -> str:
+        """Require the existing stable WorkflowStep identifier format."""
+        if not _WORKFLOW_STEP_ID_RE.fullmatch(value):
+            raise ValueError("step_id must match wf-[0-9]{3}")
+        return value
+
+    @field_validator("original_action")
+    @classmethod
+    def original_action_non_blank(cls, value: str) -> str:
+        """Require original action text."""
+        if not value or not value.strip():
+            raise ValueError("original_action must not be blank")
+        return value
+
+    @field_validator("final_action", "reviewer_note")
+    @classmethod
+    def optional_review_text_non_blank(
+        cls,
+        value: str | None,
+        info: Any,
+    ) -> str | None:
+        """Reject blank final actions and notes when supplied."""
+        if value is not None and (not value or not value.strip()):
+            raise ValueError(f"{info.field_name} must not be blank")
+        return value
+
+    @field_validator("supporting_evidence_ids")
+    @classmethod
+    def evidence_ids_valid_unique(cls, values: list[str]) -> list[str]:
+        """Require valid, duplicate-free Evidence Object identifiers."""
+        for evidence_id in values:
+            _validate_evidence_id(evidence_id)
+        if len(values) != len(set(values)):
+            raise ValueError(
+                "supporting_evidence_ids must not contain duplicates"
+            )
+        return values
+
+    @field_validator("deterministic_risk_codes", "semantic_risk_codes")
+    @classmethod
+    def review_risk_codes_unique(
+        cls,
+        values: list[Any],
+        info: Any,
+    ) -> list[Any]:
+        """Reject duplicate risk-code lineage."""
+        if len(values) != len(set(values)):
+            raise ValueError(f"{info.field_name} must not contain duplicates")
+        return values
+
+    @model_validator(mode="after")
+    def decision_snapshot_is_consistent(self) -> "HumanReviewedStep":
+        """Enforce decision output and semantic-gate review rules."""
+        if self.decision == HumanReviewDecision.accept:
+            if self.final_action != self.original_action:
+                raise ValueError(
+                    "accept requires final_action to equal original_action"
+                )
+            if self.revision_requires_revalidation:
+                raise ValueError(
+                    "accept cannot require revision revalidation"
+                )
+        elif self.decision == HumanReviewDecision.reject:
+            if self.final_action is not None:
+                raise ValueError("reject requires final_action=None")
+            if self.reviewer_note is None:
+                raise ValueError("reject requires reviewer_note")
+            if self.revision_requires_revalidation:
+                raise ValueError(
+                    "reject cannot require revision revalidation"
+                )
+        else:
+            if self.final_action is None:
+                raise ValueError("revise requires final_action")
+            if self.final_action == self.original_action:
+                raise ValueError(
+                    "revise requires final_action to differ from original_action"
+                )
+            if self.reviewer_note is None:
+                raise ValueError("revise requires reviewer_note")
+            if not self.revision_requires_revalidation:
+                raise ValueError(
+                    "revise requires revision_requires_revalidation=true"
+                )
+
+        if self.step_kind == WorkflowStepKind.semantic_review_gate:
+            if self.decision == HumanReviewDecision.revise:
+                raise ValueError("semantic_review_gate cannot be revised")
+            if self.reviewer_note is None:
+                raise ValueError(
+                    "semantic_review_gate decisions require reviewer_note"
+                )
+        return self
+
+
+class HumanReviewSession(ContractModel):
+    """Deterministic simulated review ledger bound to one WorkflowPlan."""
+
+    plan_digest: str
+    plan_step_ids: list[str]
+    reviewed_steps: list[HumanReviewedStep]
+    pending_step_ids: list[str]
+    accepted_step_ids: list[str]
+    rejected_step_ids: list[str]
+    revised_step_ids: list[str]
+    session_status: HumanReviewSessionStatus
+    no_action_acknowledged: bool = Field(strict=True)
+    overall_note: str | None
+    human_review_complete: bool
+    review_method: Literal["simulated_human_review_v1"]
+
+    @field_validator("plan_digest")
+    @classmethod
+    def plan_digest_format(cls, value: str) -> str:
+        """Require a full lowercase SHA-256 digest."""
+        if not _DIGEST_RE.fullmatch(value):
+            raise ValueError(
+                "plan_digest must be 64 lowercase hexadecimal characters"
+            )
+        return value
+
+    @field_validator(
+        "plan_step_ids",
+        "pending_step_ids",
+        "accepted_step_ids",
+        "rejected_step_ids",
+        "revised_step_ids",
+    )
+    @classmethod
+    def step_id_lists_valid_unique(
+        cls,
+        values: list[str],
+        info: Any,
+    ) -> list[str]:
+        """Require valid, duplicate-free workflow IDs in every ID list."""
+        if any(not _WORKFLOW_STEP_ID_RE.fullmatch(value) for value in values):
+            raise ValueError(
+                f"{info.field_name} values must match wf-[0-9]{{3}}"
+            )
+        if len(values) != len(set(values)):
+            raise ValueError(f"{info.field_name} must not contain duplicates")
+        return values
+
+    @field_validator("overall_note")
+    @classmethod
+    def overall_note_non_blank(cls, value: str | None) -> str | None:
+        """Reject a blank overall note when supplied."""
+        if value is not None and (not value or not value.strip()):
+            raise ValueError("overall_note must not be blank")
+        return value
+
+    @field_validator("reviewed_steps")
+    @classmethod
+    def reviewed_steps_ordered_unique(
+        cls,
+        values: list[HumanReviewedStep],
+    ) -> list[HumanReviewedStep]:
+        """Require unique reviewed steps in strictly increasing sequence."""
+        step_ids = [step.step_id for step in values]
+        if len(step_ids) != len(set(step_ids)):
+            raise ValueError("reviewed step IDs must be unique")
+        sequences = [step.sequence for step in values]
+        if sequences != sorted(sequences) or len(sequences) != len(set(sequences)):
+            raise ValueError(
+                "reviewed_steps must be ordered by unique sequence values"
+            )
+        return values
+
+    @model_validator(mode="after")
+    def session_partition_is_consistent(self) -> "HumanReviewSession":
+        """Validate plan binding, derived decisions, and completion state."""
+        reviewed_ids = [step.step_id for step in self.reviewed_steps]
+        reviewed_set = set(reviewed_ids)
+        pending_set = set(self.pending_step_ids)
+        plan_set = set(self.plan_step_ids)
+        if reviewed_set & pending_set:
+            raise ValueError(
+                "reviewed and pending step IDs must be disjoint"
+            )
+        if reviewed_set | pending_set != plan_set:
+            raise ValueError(
+                "reviewed and pending step IDs must partition plan_step_ids"
+            )
+        if len(reviewed_ids) + len(self.pending_step_ids) != len(
+            self.plan_step_ids
+        ):
+            raise ValueError(
+                "reviewed and pending step IDs must cover plan_step_ids exactly"
+            )
+
+        for step in self.reviewed_steps:
+            expected_sequence = self.plan_step_ids.index(step.step_id) + 1
+            if step.sequence != expected_sequence:
+                raise ValueError(
+                    "reviewed step sequence must match plan_step_ids position"
+                )
+
+        def expected_subsequence(ids: list[str]) -> list[str]:
+            selected = set(ids)
+            return [
+                step_id
+                for step_id in self.plan_step_ids
+                if step_id in selected
+            ]
+
+        if reviewed_ids != expected_subsequence(reviewed_ids):
+            raise ValueError(
+                "reviewed step IDs must preserve plan_step_ids order"
+            )
+        if self.pending_step_ids != expected_subsequence(
+            self.pending_step_ids
+        ):
+            raise ValueError(
+                "pending_step_ids must preserve plan_step_ids order"
+            )
+
+        expected_decision_ids = {
+            HumanReviewDecision.accept: [
+                step.step_id
+                for step in self.reviewed_steps
+                if step.decision == HumanReviewDecision.accept
+            ],
+            HumanReviewDecision.reject: [
+                step.step_id
+                for step in self.reviewed_steps
+                if step.decision == HumanReviewDecision.reject
+            ],
+            HumanReviewDecision.revise: [
+                step.step_id
+                for step in self.reviewed_steps
+                if step.decision == HumanReviewDecision.revise
+            ],
+        }
+        if self.accepted_step_ids != expected_decision_ids[
+            HumanReviewDecision.accept
+        ]:
+            raise ValueError(
+                "accepted_step_ids must match reviewed accept decisions"
+            )
+        if self.rejected_step_ids != expected_decision_ids[
+            HumanReviewDecision.reject
+        ]:
+            raise ValueError(
+                "rejected_step_ids must match reviewed reject decisions"
+            )
+        if self.revised_step_ids != expected_decision_ids[
+            HumanReviewDecision.revise
+        ]:
+            raise ValueError(
+                "revised_step_ids must match reviewed revise decisions"
+            )
+
+        if self.plan_step_ids:
+            if self.no_action_acknowledged:
+                raise ValueError(
+                    "non-empty plans cannot use no_action_acknowledged"
+                )
+            expected_status = (
+                HumanReviewSessionStatus.complete
+                if not self.pending_step_ids
+                else HumanReviewSessionStatus.pending
+            )
+        else:
+            if (
+                self.reviewed_steps
+                or self.pending_step_ids
+                or self.accepted_step_ids
+                or self.rejected_step_ids
+                or self.revised_step_ids
+            ):
+                raise ValueError(
+                    "empty-plan sessions cannot contain step records or IDs"
+                )
+            if self.no_action_acknowledged and self.overall_note is None:
+                raise ValueError(
+                    "acknowledged empty plans require overall_note"
+                )
+            expected_status = (
+                HumanReviewSessionStatus.complete
+                if self.no_action_acknowledged
+                else HumanReviewSessionStatus.pending
+            )
+
+        if self.session_status != expected_status:
+            raise ValueError(
+                "session_status is inconsistent with pending review state"
+            )
+        expected_complete = (
+            self.session_status == HumanReviewSessionStatus.complete
+        )
+        if self.human_review_complete != expected_complete:
+            raise ValueError(
+                "human_review_complete must match session_status"
+            )
+        return self
