@@ -1,0 +1,7 @@
+{
+  "industry_context": "Industry analysts observe that proactive customer engagement and early-warning monitoring are associated with improved renewal rates in B2B SaaS markets. This is an external industry observation and is not evidence of this company's customer behavior, renewal performance, or operational practices.",
+  "strategy_profile": "The company wants to protect high-value renewals but will not authorize broad customer outreach until customer data quality and targeting evidence have been reviewed and validated by the relevant roles.",
+  "business_question": "Is the current evidence sufficient to design a limited high-value customer retention pilot for human review?",
+  "decision_goal": "Determine what must be validated, what each role should review, and whether any retention action is currently supportable.",
+  "user_assumption": "Accounts with more support tickets may be more likely to churn. This assumption has not been validated against empirical data and must remain visibly unverified."
+}
