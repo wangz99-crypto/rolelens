@@ -19,6 +19,15 @@ from app.business_profile import (
 from app.context_evidence import extract_context_evidence
 from app.data_health import analyze_data_health
 from app.data_parser import parse_csv
+from app.dataset_orientation import (
+    DatasetOrientationFailure,
+    DatasetOrientationOutcome,
+    DatasetOrientationProvider,
+    DatasetPrimer,
+    build_dataset_orientation_request,
+    build_dataset_primer,
+    orient_dataset,
+)
 from app.evidence_builder import build_evidence
 from app.file_intake import ingest_csv
 from app.risk_checker import check_role_risks
@@ -92,6 +101,9 @@ class DemoAnalysisResult:
         workflow_plan:             WorkflowPlan from plan_workflow().
         role_model_label:          Model label string for display (or None).
         semantic_model_label:      Model label string for display (or None).
+        dataset_primer:            Deterministic selected-playbook primer.
+        dataset_orientation_outcome: Typed Granite brief or safe failure.
+        orientation_model_label:   Live orientation model label (or None).
     """
 
     prepared_inputs: PreparedDemoInputs
@@ -101,6 +113,9 @@ class DemoAnalysisResult:
     workflow_plan: WorkflowPlan
     role_model_label: str | None
     semantic_model_label: str | None
+    dataset_primer: DatasetPrimer | None = None
+    dataset_orientation_outcome: DatasetOrientationOutcome | None = None
+    orientation_model_label: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -358,6 +373,7 @@ def run_live_demo_analysis(
     prepared_inputs: PreparedDemoInputs,
     role_provider=None,
     semantic_provider: SemanticRiskProvider | None = None,
+    orientation_provider: DatasetOrientationProvider | None = None,
 ) -> DemoAnalysisResult:
     """Run the live IBM Granite pipeline on already-prepared inputs.
 
@@ -374,6 +390,67 @@ def run_live_demo_analysis(
     # Lazy provider construction — only when callers omit them.
     role_model_label: str | None = None
     semantic_model_label: str | None = None
+    orientation_model_label: str | None = None
+    dataset_primer: DatasetPrimer | None = None
+    dataset_orientation_outcome: DatasetOrientationOutcome | None = None
+
+    if prepared_inputs.business_profile is not None:
+        business_question = prepared_inputs.available_inputs.get(
+            "business_question",
+            "",
+        )
+        try:
+            dataset_primer = build_dataset_primer(
+                prepared_inputs.business_profile,
+                business_question=business_question,
+            )
+            business_types = {
+                "business_overall_churn",
+                "business_contract_churn",
+                "business_support_churn",
+                "business_internet_churn",
+                "business_payment_churn",
+                "business_churn_medians",
+                "business_parseability",
+            }
+            business_evidence = [
+                evidence
+                for evidence in prepared_inputs.evidence_objects
+                if evidence.evidence_type in business_types
+            ]
+            orientation_request = build_dataset_orientation_request(
+                business_profile=prepared_inputs.business_profile,
+                evidence_objects=business_evidence,
+                business_question=business_question,
+            )
+        except Exception:
+            dataset_orientation_outcome = DatasetOrientationFailure(
+                failure_code="invalid_output",
+                reason=(
+                    "Dataset orientation output failed structured validation."
+                ),
+            )
+        else:
+            if orientation_provider is None:
+                try:
+                    from app.granite_dataset_orientation_provider import (
+                        GraniteDatasetOrientationProvider,
+                    )
+
+                    orientation_provider = (
+                        GraniteDatasetOrientationProvider.from_env()
+                    )
+                    orientation_model_label = "IBM Granite / watsonx.ai"
+                except Exception:
+                    dataset_orientation_outcome = DatasetOrientationFailure(
+                        failure_code="provider_error",
+                        reason="Dataset orientation provider failed.",
+                    )
+            if orientation_provider is not None:
+                dataset_orientation_outcome = orient_dataset(
+                    provider=orientation_provider,
+                    request=orientation_request,
+                )
 
     if role_provider is None:
         try:
@@ -462,4 +539,7 @@ def run_live_demo_analysis(
         workflow_plan=workflow_plan,
         role_model_label=role_model_label,
         semantic_model_label=semantic_model_label,
+        dataset_primer=dataset_primer,
+        dataset_orientation_outcome=dataset_orientation_outcome,
+        orientation_model_label=orientation_model_label,
     )
