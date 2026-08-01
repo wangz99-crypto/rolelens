@@ -1,20 +1,8 @@
-"""app/main.py — RoleLens Task 10A Streamlit demo application.
+"""Product-first Streamlit surface for the governed RoleLens demo.
 
-Six-tab evidence-grounded AI decision workflow for business teams.
-
-Normal Python import defines UI functions without rendering the application,
-constructing providers, or making network calls. Initial Streamlit rendering
-may inspect only the boolean presence of required environment-variable names;
-it never displays their values or constructs providers. Only the
-'Run RoleLens with IBM Granite' button triggers run_live_demo_analysis().
-
-Tabs:
-  1. Intake
-  2. Data Health
-  3. Evidence Board
-  4. RoleLens Views
-  5. Workflow Plan
-  6. Decision Memo
+Normal import defines helpers only.  It does not render Streamlit, read
+credentials, construct providers, or call the network.  Only the explicit
+``Run with IBM Granite`` button invokes live analysis.
 """
 
 from __future__ import annotations
@@ -25,8 +13,14 @@ import pathlib
 from collections.abc import Mapping, MutableMapping
 from typing import Any
 
+import pandas as pd
 import streamlit as st
 
+from app.dataset_orientation import (
+    DatasetOrientationBrief,
+    DatasetOrientationFailure,
+    build_dataset_primer,
+)
 from app.demo_pipeline import (
     DemoAnalysisResult,
     DemoPipelineError,
@@ -37,9 +31,14 @@ from app.demo_pipeline import (
 )
 from app.human_review import HumanReviewInputError, review_workflow_plan
 from app.memo_generator import DecisionMemoInputError, compose_decision_memo
+from app.product_view import (
+    build_action_plan_summary,
+    build_decision_brief,
+    build_memo_summary,
+    build_role_comparison,
+)
 from app.role_engine import InsufficientEvidence, RoleGenerationFailure
 from app.schemas import (
-    DecisionMemoActionOrigin,
     EvidenceScope,
     HumanReviewDecision,
     HumanReviewSession,
@@ -51,27 +50,40 @@ from app.schemas import (
     WorkflowStepStatus,
 )
 
-# ---------------------------------------------------------------------------
-# Page config — must be first Streamlit call
-# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Sample data paths
-# ---------------------------------------------------------------------------
+# Explicit source modes.
+DEMO_SOURCE_NONE = "none"
+DEMO_SOURCE_IBM_TELCO = "ibm_telco"
+DEMO_SOURCE_CUSTOM = "custom"
+DEMO_SOURCE_SYNTHETIC_FIXTURE = "synthetic_fixture"
+DEMO_SOURCE_MODES = frozenset(
+    {
+        DEMO_SOURCE_NONE,
+        DEMO_SOURCE_IBM_TELCO,
+        DEMO_SOURCE_CUSTOM,
+        DEMO_SOURCE_SYNTHETIC_FIXTURE,
+    }
+)
 
-_SAMPLE_DATA_DIR = pathlib.Path(__file__).parent.parent / "sample_data"
+_ROOT = pathlib.Path(__file__).parent.parent
+_SAMPLE_DATA_DIR = _ROOT / "sample_data"
+_IBM_CSV_PATH = _SAMPLE_DATA_DIR / "public" / "ibm_telco_customer_churn.csv"
+_IBM_CONTEXT_PATH = (
+    _SAMPLE_DATA_DIR / "public" / "ibm_telco_customer_churn_context.json"
+)
 _DEMO_CSV_PATH = _SAMPLE_DATA_DIR / "b2b_saas_retention_demo.csv"
 _DEMO_JSON_PATH = _SAMPLE_DATA_DIR / "b2b_saas_retention_demo.json"
 
-# ---------------------------------------------------------------------------
-# Session state keys
-# ---------------------------------------------------------------------------
+_IBM_PROFILE_ID = "ibm_telco_churn_v1"
+_IBM_SOURCE_LABEL = "IBM Telco public demo"
+_SYNTHETIC_SOURCE_LABEL = "Synthetic B2B SaaS QA fixture"
 
 _SK_PREPARED = "rolelens_prepared_inputs"
 _SK_ANALYSIS = "rolelens_analysis_result"
 _SK_REVIEW_SESSION = "rolelens_review_session"
 _SK_MEMO = "rolelens_decision_memo"
 _SK_REVIEW_PRESET_LOADED = "rolelens_review_preset_loaded"
+_SK_SOURCE_LABEL = "rolelens_source_label"
 
 _CONTEXT_WIDGET_KEYS = (
     "field_industry_context",
@@ -85,11 +97,6 @@ _REVIEW_WIDGET_PREFIXES = (
     "review_note_",
     "review_revised_",
 )
-
-# ---------------------------------------------------------------------------
-# Role display names (policy-aligned)
-# ---------------------------------------------------------------------------
-
 _ROLE_DISPLAY = {
     RoleKey.executive: "Executive",
     RoleKey.data_analyst: "Data Analyst / Data Scientist",
@@ -97,121 +104,177 @@ _ROLE_DISPLAY = {
     RoleKey.sales_marketing: "Sales / Marketing",
     RoleKey.project_manager: "Project Manager",
 }
-
-_ROLE_DISPLAY_ORDER = [
-    RoleKey.executive,
-    RoleKey.data_analyst,
-    RoleKey.data_engineer,
-    RoleKey.sales_marketing,
-    RoleKey.project_manager,
-]
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+_ROLE_DISPLAY_ORDER = tuple(_ROLE_DISPLAY)
 
 
 def _configured() -> bool:
-    """Return True iff all three watsonx.ai env vars are present and non-blank."""
-    required = ["WATSONX_APIKEY", "WATSONX_URL", "WATSONX_PROJECT_ID"]
-    return all(os.environ.get(k, "").strip() for k in required)
+    """Return whether all required watsonx.ai variables are non-blank."""
+    required = ("WATSONX_APIKEY", "WATSONX_URL", "WATSONX_PROJECT_ID")
+    return all(os.environ.get(key, "").strip() for key in required)
 
 
-def _load_sample_data() -> dict:
-    """Load demo JSON sidecar, return empty dict on failure."""
+def _load_json(path: pathlib.Path) -> dict[str, Any]:
+    """Load a local JSON object, returning an empty object on failure."""
     try:
-        return json.loads(_DEMO_JSON_PATH.read_text(encoding="utf-8"))
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
     except Exception:
         return {}
 
 
-def _initialize_demo_widget_state(
-    state: MutableMapping[str, Any],
-) -> None:
-    """Initialize actual intake widget keys before widget construction."""
+def _load_sample_data() -> dict[str, Any]:
+    """Load the synthetic QA sidecar."""
+    return _load_json(_DEMO_JSON_PATH)
+
+
+def _load_ibm_context() -> dict[str, Any]:
+    """Load the frozen IBM Telco public context sidecar."""
+    return _load_json(_IBM_CONTEXT_PATH)
+
+
+def _initialize_demo_widget_state(state: MutableMapping[str, Any]) -> None:
+    """Initialize source and editable context widget state."""
     for key in _CONTEXT_WIDGET_KEYS:
         state.setdefault(key, "")
-    state.setdefault("demo_use_sample_csv", False)
+    mode = state.setdefault("demo_source_mode", DEMO_SOURCE_NONE)
+    if mode not in DEMO_SOURCE_MODES:
+        state["demo_source_mode"] = DEMO_SOURCE_NONE
 
 
-def _apply_synthetic_sample(
-    sample: Mapping[str, Any],
-    state: MutableMapping[str, Any],
-) -> None:
-    """Invalidate prepared state, then write the synthetic intake values."""
-    _invalidate_prepared_demo_state(state)
-    state.pop("csv_uploader", None)
-    source_to_widget = {
-        "industry_context": "field_industry_context",
-        "strategy_profile": "field_strategy_profile",
-        "business_question": "field_business_question",
-        "decision_goal": "field_decision_goal",
-        "user_assumption": "field_user_assumption",
-    }
-    for source_key, widget_key in source_to_widget.items():
-        value = sample.get(source_key, "")
-        state[widget_key] = value if isinstance(value, str) else ""
-    state["demo_use_sample_csv"] = True
-
-
-def _clear_review_widget_state(
-    state: MutableMapping[str, Any],
-) -> None:
+def _clear_review_widget_state(state: MutableMapping[str, Any]) -> None:
     """Clear only RoleLens review preset and per-step widget keys."""
     for key in list(state):
         if (
             key in {"demo_review_preset", _SK_REVIEW_PRESET_LOADED}
             or any(key.startswith(prefix) for prefix in _REVIEW_WIDGET_PREFIXES)
         ):
-                del state[key]
+            del state[key]
 
 
-def _invalidate_prepared_demo_state(
-    state: MutableMapping[str, Any],
-) -> None:
-    """Clear prepared and downstream RoleLens state after an input change."""
+def _invalidate_prepared_demo_state(state: MutableMapping[str, Any]) -> None:
+    """Clear prepared and downstream RoleLens state after input changes."""
     _clear_review_widget_state(state)
-    for key in (
-        _SK_PREPARED,
-        _SK_ANALYSIS,
-        _SK_REVIEW_SESSION,
-        _SK_MEMO,
-    ):
+    for key in (_SK_PREPARED, _SK_ANALYSIS, _SK_REVIEW_SESSION, _SK_MEMO):
         state.pop(key, None)
 
 
 def _invalidate_prepared_demo_session_state() -> None:
-    """Apply decision-input invalidation to Streamlit session state."""
+    """Invalidate prepared state from a Streamlit widget callback."""
     _invalidate_prepared_demo_state(st.session_state)
+
+
+def _write_context_fields(
+    values: Mapping[str, Any],
+    state: MutableMapping[str, Any],
+    *,
+    industry_source_key: str,
+) -> None:
+    """Copy exact sidecar context values into their widget keys."""
+    source_to_widget = {
+        industry_source_key: "field_industry_context",
+        "strategy_profile": "field_strategy_profile",
+        "business_question": "field_business_question",
+        "decision_goal": "field_decision_goal",
+        "user_assumption": "field_user_assumption",
+    }
+    for source_key, widget_key in source_to_widget.items():
+        value = values.get(source_key, "")
+        state[widget_key] = value if isinstance(value, str) else ""
+
+
+def _apply_ibm_telco_sample(
+    context: Mapping[str, Any],
+    state: MutableMapping[str, Any],
+) -> None:
+    """Select IBM mode and populate context without preparing or calling AI."""
+    _invalidate_prepared_demo_state(state)
+    state.pop("csv_uploader", None)
+    _write_context_fields(
+        context,
+        state,
+        industry_source_key="dataset_context",
+    )
+    state["demo_source_mode"] = DEMO_SOURCE_IBM_TELCO
+    state[_SK_SOURCE_LABEL] = _IBM_SOURCE_LABEL
+
+
+def _apply_synthetic_sample(
+    sample: Mapping[str, Any],
+    state: MutableMapping[str, Any],
+) -> None:
+    """Select the QA fixture and populate its existing context fields."""
+    _invalidate_prepared_demo_state(state)
+    state.pop("csv_uploader", None)
+    _write_context_fields(
+        sample,
+        state,
+        industry_source_key="industry_context",
+    )
+    state["demo_source_mode"] = DEMO_SOURCE_SYNTHETIC_FIXTURE
+    state[_SK_SOURCE_LABEL] = _SYNTHETIC_SOURCE_LABEL
 
 
 def _handle_csv_uploader_change() -> None:
-    """Select custom-upload mode and invalidate prepared RoleLens state."""
-    st.session_state["demo_use_sample_csv"] = False
+    """Select custom mode for an upload, or none after it is cleared."""
+    previous_mode = st.session_state.get(
+        "demo_source_mode",
+        DEMO_SOURCE_NONE,
+    )
+    uploaded_file = st.session_state.get("csv_uploader")
+    if uploaded_file is None:
+        st.session_state["demo_source_mode"] = DEMO_SOURCE_NONE
+        st.session_state.pop(_SK_SOURCE_LABEL, None)
+    else:
+        if previous_mode in {
+            DEMO_SOURCE_IBM_TELCO,
+            DEMO_SOURCE_SYNTHETIC_FIXTURE,
+        }:
+            for key in _CONTEXT_WIDGET_KEYS:
+                st.session_state[key] = ""
+        st.session_state["demo_source_mode"] = DEMO_SOURCE_CUSTOM
+        filename = getattr(uploaded_file, "name", "")
+        safe_name = filename if isinstance(filename, str) and filename else "CSV"
+        st.session_state[_SK_SOURCE_LABEL] = f"Custom upload: {safe_name}"
     _invalidate_prepared_demo_state(st.session_state)
 
 
-def _resolve_csv_input(
+def _resolve_demo_source(
+    source_mode: str,
     uploaded_file: Any,
-    use_sample_csv: bool,
-) -> tuple[bytes, str]:
-    """Resolve exactly one selected CSV source without cursor dependence."""
-    if use_sample_csv:
+) -> tuple[bytes, str, str | None, str]:
+    """Resolve one explicit source to bytes, filename, profile, and label."""
+    if source_mode == DEMO_SOURCE_IBM_TELCO:
+        if not _IBM_CSV_PATH.is_file():
+            raise ValueError("IBM Telco public demo CSV is unavailable.")
+        return (
+            _IBM_CSV_PATH.read_bytes(),
+            _IBM_CSV_PATH.name,
+            _IBM_PROFILE_ID,
+            _IBM_SOURCE_LABEL,
+        )
+    if source_mode == DEMO_SOURCE_SYNTHETIC_FIXTURE:
         if not _DEMO_CSV_PATH.is_file():
-            raise ValueError("Synthetic sample CSV is unavailable.")
-        return _DEMO_CSV_PATH.read_bytes(), _DEMO_CSV_PATH.name
-
-    if uploaded_file is None:
+            raise ValueError("Synthetic QA fixture CSV is unavailable.")
+        return (
+            _DEMO_CSV_PATH.read_bytes(),
+            _DEMO_CSV_PATH.name,
+            None,
+            _SYNTHETIC_SOURCE_LABEL,
+        )
+    if source_mode == DEMO_SOURCE_CUSTOM:
+        if uploaded_file is None:
+            raise ValueError("No custom CSV upload is selected.")
+        try:
+            csv_bytes = uploaded_file.getvalue()
+            filename = uploaded_file.name
+        except Exception:
+            raise ValueError("Uploaded CSV could not be read.") from None
+        if not isinstance(csv_bytes, bytes) or not isinstance(filename, str):
+            raise ValueError("Uploaded CSV is invalid.")
+        return csv_bytes, filename, None, f"Custom upload: {filename}"
+    if source_mode == DEMO_SOURCE_NONE:
         raise ValueError("No CSV source is selected.")
-
-    try:
-        csv_bytes = uploaded_file.getvalue()
-        csv_filename = uploaded_file.name
-    except Exception:
-        raise ValueError("Uploaded CSV could not be read.") from None
-    if not isinstance(csv_bytes, bytes) or not isinstance(csv_filename, str):
-        raise ValueError("Uploaded CSV is invalid.")
-    return csv_bytes, csv_filename
+    raise ValueError("Demo source mode is invalid.")
 
 
 def _prepare_demo_inputs_transaction(
@@ -224,8 +287,10 @@ def _prepare_demo_inputs_transaction(
     business_question: str,
     decision_goal: str,
     user_assumption: str | None,
+    business_profile_id: str | None,
+    source_label: str,
 ) -> PreparedDemoInputs:
-    """Prepare first, then atomically replace prepared and downstream state."""
+    """Prepare first, then atomically replace prepared/downstream state."""
     prepared = prepare_demo_inputs(
         csv_bytes=csv_bytes,
         filename=filename,
@@ -234,8 +299,10 @@ def _prepare_demo_inputs_transaction(
         business_question=business_question,
         decision_goal=decision_goal,
         user_assumption=user_assumption,
+        business_profile_id=business_profile_id,
     )
     state[_SK_PREPARED] = prepared
+    state[_SK_SOURCE_LABEL] = source_label
     _clear_review_widget_state(state)
     for key in (_SK_ANALYSIS, _SK_REVIEW_SESSION, _SK_MEMO):
         state.pop(key, None)
@@ -246,7 +313,7 @@ def _run_live_demo_analysis_transaction(
     state: MutableMapping[str, Any],
     prepared: PreparedDemoInputs,
 ) -> DemoAnalysisResult:
-    """Run live analysis first, then atomically clear stale downstream state."""
+    """Run live analysis first, then replace analysis/downstream state."""
     analysis = run_live_demo_analysis(prepared)
     state[_SK_ANALYSIS] = analysis
     _clear_review_widget_state(state)
@@ -255,40 +322,18 @@ def _run_live_demo_analysis_transaction(
     return analysis
 
 
-def _record_empty_workflow_review(
-    state: MutableMapping[str, Any],
-    workflow_plan: WorkflowPlan,
-    overall_note: str,
-) -> HumanReviewSession:
-    """Record an explicit, written acknowledgment for an empty workflow."""
-    if not isinstance(overall_note, str) or not overall_note.strip():
-        raise HumanReviewInputError("No-action review note is required.")
-    session = review_workflow_plan(
-        workflow_plan,
-        {},
-        no_action_acknowledged=True,
-        overall_note=overall_note,
-    )
-    if not session.human_review_complete:
-        raise HumanReviewInputError(
-            "No-action acknowledgment did not complete review."
-        )
-    state[_SK_REVIEW_SESSION] = session
-    state.pop(_SK_MEMO, None)
-    return session
-
-
 def _reset_rolelens_state() -> None:
-    """Clear only RoleLens-specific session keys."""
+    """Clear only RoleLens-owned and RoleLens widget session keys."""
     _invalidate_prepared_demo_state(st.session_state)
-    keys = [
+    keys = (
         *_CONTEXT_WIDGET_KEYS,
-        "demo_use_sample_csv",
+        "demo_source_mode",
         "csv_uploader",
-    ]
+        _SK_SOURCE_LABEL,
+        "review_note_no_action",
+    )
     for key in keys:
-        if key in st.session_state:
-            del st.session_state[key]
+        st.session_state.pop(key, None)
 
 
 def _build_synthetic_review_preset(
@@ -296,10 +341,7 @@ def _build_synthetic_review_preset(
 ) -> dict[str, dict[str, str]]:
     """Build deterministic editable controls from typed workflow fields."""
     if type(workflow_plan) is not WorkflowPlan:
-        raise HumanReviewInputError(
-            "workflow_plan must be exactly a WorkflowPlan"
-        )
-
+        raise HumanReviewInputError("workflow_plan must be exactly a WorkflowPlan")
     non_gate_steps = [
         step
         for step in workflow_plan.steps
@@ -309,10 +351,8 @@ def _build_synthetic_review_preset(
         (
             step
             for step in non_gate_steps
-            if (
-                not step.blocks_downstream
-                and step.status is not WorkflowStepStatus.blocked
-            )
+            if not step.blocks_downstream
+            and step.status is not WorkflowStepStatus.blocked
         ),
         non_gate_steps[0] if non_gate_steps else None,
     )
@@ -320,26 +360,17 @@ def _build_synthetic_review_preset(
         (
             step
             for step in reversed(workflow_plan.steps)
-            if (
-                step.step_kind is WorkflowStepKind.role_action
-                and step is not revision_step
-                and (
-                    revision_step is None
-                    or step.sequence > revision_step.sequence
-                )
-            )
+            if step.step_kind is WorkflowStepKind.role_action
+            and step is not revision_step
+            and (revision_step is None or step.sequence > revision_step.sequence)
         ),
         None,
     )
-
     preset: dict[str, dict[str, str]] = {}
     for step in workflow_plan.steps:
         if step.step_kind is WorkflowStepKind.semantic_review_gate:
             decision = "accept"
-            note = (
-                "Semantic candidates reviewed as probabilistic and "
-                "non-authoritative."
-            )
+            note = "Semantic candidates reviewed as probabilistic and non-authoritative."
             revised_action = ""
         elif step is revision_step:
             decision = "revise"
@@ -350,9 +381,7 @@ def _build_synthetic_review_preset(
             )
         elif step is rejection_step:
             decision = "reject"
-            note = (
-                "Synthetic downstream role action rejected pending review."
-            )
+            note = "Synthetic downstream role action rejected pending review."
             revised_action = ""
         else:
             decision = "accept"
@@ -374,7 +403,7 @@ def _apply_synthetic_review_preset(
     workflow_plan: WorkflowPlan,
     state: MutableMapping[str, Any],
 ) -> None:
-    """Write a synthetic preset directly to the actual review widget keys."""
+    """Populate editable review widgets without recording any review."""
     preset = _build_synthetic_review_preset(workflow_plan)
     state["demo_review_preset"] = preset
     state[_SK_REVIEW_PRESET_LOADED] = True
@@ -390,97 +419,42 @@ def _build_human_review_inputs(
 ) -> dict[str, HumanReviewStepInput]:
     """Build exact typed review inputs or raise a sanitized public error."""
     if type(workflow_plan) is not WorkflowPlan:
-        raise HumanReviewInputError(
-            "workflow_plan must be exactly a WorkflowPlan"
-        )
+        raise HumanReviewInputError("workflow_plan must be exactly a WorkflowPlan")
     if not isinstance(raw_controls, Mapping):
         raise HumanReviewInputError("Review controls must be a mapping.")
-
     plan_step_ids = tuple(step.step_id for step in workflow_plan.steps)
-    if (
-        any(not isinstance(step_id, str) for step_id in raw_controls)
-        or set(raw_controls) != set(plan_step_ids)
-    ):
-        raise HumanReviewInputError(
-            "Review controls must match workflow plan steps."
-        )
+    if any(not isinstance(key, str) for key in raw_controls) or set(
+        raw_controls
+    ) != set(plan_step_ids):
+        raise HumanReviewInputError("Review controls must match workflow plan steps.")
 
     inputs: dict[str, HumanReviewStepInput] = {}
     for step in workflow_plan.steps:
         control = raw_controls[step.step_id]
         if not isinstance(control, Mapping):
-            raise HumanReviewInputError(
-                f"Review controls are invalid for step {step.step_id}."
-            )
+            raise HumanReviewInputError(f"Review controls are invalid for step {step.step_id}.")
         raw_decision = control.get("decision")
-        decision_value = (
-            raw_decision.value
-            if isinstance(raw_decision, HumanReviewDecision)
-            else raw_decision
-        )
-        if decision_value not in {"accept", "reject", "revise"}:
-            raise HumanReviewInputError(
-                f"A review decision is required for step {step.step_id}."
-            )
-
-        note = control.get("reviewer_note")
-        revised_action = control.get("revised_action")
-        if note == "":
-            note = None
-        if revised_action == "":
-            revised_action = None
-        if note is not None and (
-            not isinstance(note, str) or not note.strip()
-        ):
-            raise HumanReviewInputError(
-                f"Reviewer note is invalid for step {step.step_id}."
-            )
-        if revised_action is not None and (
-            not isinstance(revised_action, str)
-            or not revised_action.strip()
-        ):
-            raise HumanReviewInputError(
-                f"Revised action is invalid for step {step.step_id}."
-            )
-
-        if step.step_kind is WorkflowStepKind.semantic_review_gate:
-            if decision_value == "revise":
-                raise HumanReviewInputError(
-                    f"Semantic review gate {step.step_id} cannot be revised."
-                )
-            if note is None:
-                raise HumanReviewInputError(
-                    f"Semantic review gate {step.step_id} requires a "
-                    "reviewer note."
-                )
-        elif decision_value == "reject" and note is None:
-            raise HumanReviewInputError(
-                f"Rejecting step {step.step_id} requires a reviewer note."
-            )
-        elif decision_value == "revise":
-            if note is None:
-                raise HumanReviewInputError(
-                    f"Revising step {step.step_id} requires a reviewer note."
-                )
-            if revised_action is None:
-                raise HumanReviewInputError(
-                    f"Revising step {step.step_id} requires a revised action."
-                )
-            if revised_action == step.action:
-                raise HumanReviewInputError(
-                    f"Revised action for step {step.step_id} must differ "
-                    "from the original action."
-                )
-
+        decision = raw_decision.value if isinstance(raw_decision, HumanReviewDecision) else raw_decision
+        if decision not in {"accept", "reject", "revise"}:
+            raise HumanReviewInputError(f"A review decision is required for step {step.step_id}.")
+        note = control.get("reviewer_note") or None
+        revised = control.get("revised_action") or None
+        if note is not None and (not isinstance(note, str) or not note.strip()):
+            raise HumanReviewInputError(f"Reviewer note is invalid for step {step.step_id}.")
+        if revised is not None and (not isinstance(revised, str) or not revised.strip()):
+            raise HumanReviewInputError(f"Revised action is invalid for step {step.step_id}.")
+        is_gate = step.step_kind is WorkflowStepKind.semantic_review_gate
+        if is_gate and decision == "revise":
+            raise HumanReviewInputError(f"Semantic review gate {step.step_id} cannot be revised.")
+        if (is_gate or decision in {"reject", "revise"}) and note is None:
+            raise HumanReviewInputError(f"Reviewer note is required for step {step.step_id}.")
+        if decision == "revise" and (revised is None or revised == step.action):
+            raise HumanReviewInputError(f"A distinct revised action is required for step {step.step_id}.")
         try:
             inputs[step.step_id] = HumanReviewStepInput(
-                decision=HumanReviewDecision(decision_value),
+                decision=HumanReviewDecision(decision),
                 reviewer_note=note,
-                revised_action=(
-                    revised_action
-                    if decision_value == "revise"
-                    else None
-                ),
+                revised_action=revised if decision == "revise" else None,
             )
         except (TypeError, ValueError):
             raise HumanReviewInputError(
@@ -489,918 +463,700 @@ def _build_human_review_inputs(
     return inputs
 
 
-def _evidence_scope_label(scope: EvidenceScope) -> str:
-    mapping = {
-        EvidenceScope.internal_observation: "Internal Observation",
-        EvidenceScope.external_context: "External Context",
-        EvidenceScope.assumption: "Assumption",
-        EvidenceScope.stated_priority: "Stated Priority",
-    }
-    return mapping.get(scope, scope.value)
+def _record_empty_workflow_review(
+    state: MutableMapping[str, Any],
+    workflow_plan: WorkflowPlan,
+    overall_note: str,
+) -> HumanReviewSession:
+    """Record an explicit written acknowledgment for an empty workflow."""
+    if not isinstance(overall_note, str) or not overall_note.strip():
+        raise HumanReviewInputError("No-action review note is required.")
+    session = review_workflow_plan(
+        workflow_plan,
+        {},
+        no_action_acknowledged=True,
+        overall_note=overall_note,
+    )
+    if not session.human_review_complete:
+        raise HumanReviewInputError("No-action acknowledgment did not complete review.")
+    state[_SK_REVIEW_SESSION] = session
+    state.pop(_SK_MEMO, None)
+    return session
 
 
-def _step_kind_label(kind: WorkflowStepKind) -> str:
-    mapping = {
-        WorkflowStepKind.deterministic_risk_resolution: "Deterministic Risk Resolution",
-        WorkflowStepKind.semantic_review_gate: "Semantic Review Gate",
-        WorkflowStepKind.role_action: "Role Action",
-    }
-    return mapping.get(kind, kind.value)
-
-
-def _step_status_label(status: WorkflowStepStatus) -> str:
-    mapping = {
-        WorkflowStepStatus.ready: "Ready",
-        WorkflowStepStatus.blocked: "BLOCKED",
-        WorkflowStepStatus.pending_human_review: "Pending Human Review",
-    }
-    return mapping.get(status, status.value)
-
-
-# ---------------------------------------------------------------------------
-# Header
-# ---------------------------------------------------------------------------
+def _role_name(role_key: RoleKey) -> str:
+    """Return the fixed human-readable role name."""
+    return _ROLE_DISPLAY.get(role_key, role_key.value)
 
 
 def _render_header() -> None:
-    st.title("🔎 RoleLens")
+    """Render the product name, promise, process, and configuration status."""
+    st.title("RoleLens")
     st.markdown(
-        "**Evidence-grounded AI decision workflow for business teams**"
+        "Turn business data into a shared, reviewable decision — not another AI answer."
     )
-    st.caption(
-        "Not another CSV chatbot: every decision-bearing step preserves "
-        "Evidence IDs, risk lineage, dependencies, and human review."
-    )
+    st.caption("Understand → Compare Roles → Coordinate → Review → Decide")
+    if _configured():
+        st.success("watsonx.ai configured — Live IBM Granite / watsonx.ai")
+    else:
+        st.warning(
+            "watsonx.ai not configured — set WATSONX_APIKEY, WATSONX_URL, "
+            "and WATSONX_PROJECT_ID"
+        )
 
-    # Process ribbon
-    st.markdown(
-        "**Process:** `Evidence` → `Roles` → `Risks` → `Workflow` "
-        "→ `Human Review` → `Memo`"
-    )
 
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        if _configured():
-            st.success("watsonx.ai configured — Live IBM Granite / watsonx.ai")
-        else:
-            st.warning("watsonx.ai not configured — set WATSONX_APIKEY, WATSONX_URL, WATSONX_PROJECT_ID")
-    with col2:
+def _render_sidebar_setup() -> None:
+    """Render explicit source selection and the two pipeline transactions."""
+    _initialize_demo_widget_state(st.session_state)
+    with st.sidebar:
+        st.header("Demo setup")
+        if st.button("Load IBM Telco public demo", key="btn_load_ibm", type="primary"):
+            context = _load_ibm_context()
+            if context:
+                _apply_ibm_telco_sample(context, st.session_state)
+                st.success("IBM Telco public demo loaded. Prepare Evidence when ready.")
+            else:
+                st.error("IBM Telco public demo context is unavailable.")
+
+        with st.expander("Advanced / QA", expanded=False):
+            if st.button("Load synthetic QA fixture", key="btn_load_synthetic"):
+                sample = _load_sample_data()
+                if sample:
+                    _apply_synthetic_sample(sample, st.session_state)
+                    st.success("Synthetic QA fixture loaded.")
+                else:
+                    st.error("Synthetic QA fixture is unavailable.")
+
+        uploaded_file = st.file_uploader(
+            "Upload a custom CSV",
+            type=["csv"],
+            key="csv_uploader",
+            on_change=_handle_csv_uploader_change,
+        )
+
+        mode = st.session_state.get("demo_source_mode", DEMO_SOURCE_NONE)
+        label = st.session_state.get(_SK_SOURCE_LABEL, "No source selected")
+        st.info(f"Active source mode: {mode}\n\nSource: {label}")
+
+        st.text_area(
+            "Industry Context",
+            key="field_industry_context",
+            on_change=_invalidate_prepared_demo_session_state,
+        )
+        st.text_area(
+            "Strategy Profile",
+            key="field_strategy_profile",
+            on_change=_invalidate_prepared_demo_session_state,
+        )
+        st.text_input(
+            "Business Question",
+            key="field_business_question",
+            on_change=_invalidate_prepared_demo_session_state,
+        )
+        st.text_input(
+            "Decision Goal",
+            key="field_decision_goal",
+            on_change=_invalidate_prepared_demo_session_state,
+        )
+        st.text_area(
+            "User Assumption (optional)",
+            key="field_user_assumption",
+            on_change=_invalidate_prepared_demo_session_state,
+        )
+
+        if st.button("Prepare evidence", key="btn_prepare", type="primary"):
+            try:
+                csv_bytes, filename, profile_id, resolved_label = _resolve_demo_source(
+                    mode,
+                    uploaded_file,
+                )
+                values = {
+                    key: st.session_state.get(key, "") for key in _CONTEXT_WIDGET_KEYS
+                }
+                for required_key in _CONTEXT_WIDGET_KEYS[:4]:
+                    if not values[required_key].strip():
+                        raise ValueError("All required decision-context fields must be completed.")
+                prepared = _prepare_demo_inputs_transaction(
+                    st.session_state,
+                    csv_bytes=csv_bytes,
+                    filename=filename,
+                    industry_context=values["field_industry_context"],
+                    strategy_profile=values["field_strategy_profile"],
+                    business_question=values["field_business_question"],
+                    decision_goal=values["field_decision_goal"],
+                    user_assumption=values["field_user_assumption"].strip() or None,
+                    business_profile_id=profile_id,
+                    source_label=resolved_label,
+                )
+                st.success(
+                    f"Evidence prepared: {len(prepared.evidence_objects)} objects from "
+                    f"{prepared.row_count:,} rows."
+                )
+            except DemoPipelineError as exc:
+                st.error(f"Preparation failed: {exc}")
+            except ValueError as exc:
+                st.error(str(exc))
+
+        prepared = st.session_state.get(_SK_PREPARED)
+        if st.button(
+            "Run with IBM Granite",
+            key="btn_run_live",
+            type="primary",
+            disabled=prepared is None,
+        ):
+            if not _configured():
+                st.error("watsonx.ai is not configured.")
+            else:
+                try:
+                    analysis = _run_live_demo_analysis_transaction(
+                        st.session_state,
+                        prepared,
+                    )
+                    ready = sum(
+                        isinstance(value, RoleView)
+                        for value in analysis.role_outcomes.values()
+                    )
+                    st.success(f"Analysis complete: {ready}/5 role views produced.")
+                except DemoPipelineError as exc:
+                    st.error(f"Live run failed: {exc}")
+
         if st.button("Reset demo", key="btn_reset"):
             _reset_rolelens_state()
             st.rerun()
 
 
-# ---------------------------------------------------------------------------
-# Tab 1 — Intake
-# ---------------------------------------------------------------------------
-
-
-def _render_tab_intake() -> None:
-    _initialize_demo_widget_state(st.session_state)
-    st.header("Tab 1 — Intake")
-    st.caption(
-        "Upload a CSV and provide context. "
-        "Preparing evidence is deterministic — no Granite call is made. "
-        "Only 'Run RoleLens with IBM Granite' calls the live model."
-    )
-
-    # Sample loader
-    st.subheader("Quick Start")
-    if st.button("Load synthetic B2B SaaS demo", key="btn_load_sample"):
-        sample = _load_sample_data()
-        if not sample:
-            st.error("Sample data files not found. Check sample_data/ directory.")
-        else:
-            _apply_synthetic_sample(sample, st.session_state)
-            st.success("Synthetic B2B SaaS demo loaded. Review fields below, then click 'Prepare evidence'.")
-
-    st.divider()
-
-    # File uploader
-    st.subheader("Data Source")
-    uploaded_file = st.file_uploader(
-        "Upload CSV (or use the sample loader above)",
-        type=["csv"],
-        key="csv_uploader",
-        on_change=_handle_csv_uploader_change,
-        help="CSV only. No Excel, PDF, or image parsing in Task 10A.",
-    )
-
-    use_sample_csv = st.session_state.get("demo_use_sample_csv", False)
-
-    # Context fields
-    st.subheader("Decision Context")
-
-    industry_context = st.text_area(
-        "Industry Context",
-        height=100,
-        key="field_industry_context",
-        on_change=_invalidate_prepared_demo_session_state,
-        help="External industry observation. Must not be used as direct company evidence.",
-    )
-    strategy_profile = st.text_area(
-        "Strategy Profile",
-        height=80,
-        key="field_strategy_profile",
-        on_change=_invalidate_prepared_demo_session_state,
-        help="Company strategic priority. Stated intent, not verified performance.",
-    )
-    business_question = st.text_input(
-        "Business Question",
-        key="field_business_question",
-        on_change=_invalidate_prepared_demo_session_state,
-        help="Decision context only — produces no Evidence Object.",
-    )
-    decision_goal = st.text_input(
-        "Decision Goal",
-        key="field_decision_goal",
-        on_change=_invalidate_prepared_demo_session_state,
-        help="Decision context only — produces no Evidence Object.",
-    )
-    user_assumption = st.text_area(
-        "User Assumption (optional)",
-        height=60,
-        key="field_user_assumption",
-        on_change=_invalidate_prepared_demo_session_state,
-        help="Unverified assumption. Flagged visibly in risk review.",
-    )
-
-    st.caption(
-        "**Source scope:** Industry context = External Context | "
-        "Strategy profile / Assumption = User Assertion | "
-        "Business question / Decision goal = Decision Context (no Evidence Object produced)"
-    )
-
-    st.divider()
-
-    # Prepare button
-    col_prep, col_run = st.columns(2)
-    with col_prep:
-        if st.button("Prepare evidence", key="btn_prepare", type="primary"):
-            try:
-                csv_bytes, csv_filename = _resolve_csv_input(
-                    uploaded_file,
-                    use_sample_csv,
-                )
-            except ValueError:
-                st.error("No CSV provided. Upload a file or load the synthetic demo.")
-                return
-
-            ic = st.session_state.get("field_industry_context") or industry_context
-            sp = st.session_state.get("field_strategy_profile") or strategy_profile
-            bq = st.session_state.get("field_business_question") or business_question
-            dg = st.session_state.get("field_decision_goal") or decision_goal
-            ua = st.session_state.get("field_user_assumption") or user_assumption
-
-            if not ic.strip():
-                st.error("Industry context is required.")
-                return
-            if not sp.strip():
-                st.error("Strategy profile is required.")
-                return
-            if not bq.strip():
-                st.error("Business question is required.")
-                return
-            if not dg.strip():
-                st.error("Decision goal is required.")
-                return
-
-            with st.spinner("Preparing evidence (deterministic)…"):
-                try:
-                    prepared = _prepare_demo_inputs_transaction(
-                        st.session_state,
-                        csv_bytes=csv_bytes,
-                        filename=csv_filename,
-                        industry_context=ic,
-                        strategy_profile=sp,
-                        business_question=bq,
-                        decision_goal=dg,
-                        user_assumption=ua.strip() or None,
-                    )
-                    st.success(
-                        f"Evidence prepared: {len(prepared.evidence_objects)} Evidence Object(s) "
-                        f"from {prepared.row_count} CSV rows."
-                    )
-                except DemoPipelineError as exc:
-                    st.error(f"Preparation failed: {exc}")
-
-    with col_run:
-        prepared: PreparedDemoInputs | None = st.session_state.get(_SK_PREPARED)
-        run_disabled = prepared is None
-
-        if st.button(
-            "Run RoleLens with IBM Granite",
-            key="btn_run_live",
-            type="primary",
-            disabled=run_disabled,
-            help="Requires WATSONX_APIKEY, WATSONX_URL, WATSONX_PROJECT_ID" if not _configured() else None,
-        ):
-            if not _configured():
-                st.error(
-                    "watsonx.ai is not configured. Set WATSONX_APIKEY, WATSONX_URL, "
-                    "and WATSONX_PROJECT_ID environment variables."
-                )
-            elif prepared is not None:
-                with st.spinner("Running Live IBM Granite / watsonx.ai — this may take 30–90 seconds…"):
-                    try:
-                        analysis = _run_live_demo_analysis_transaction(
-                            st.session_state,
-                            prepared,
-                        )
-                        n_views = sum(
-                            1 for v in analysis.role_outcomes.values()
-                            if isinstance(v, RoleView)
-                        )
-                        st.success(
-                            f"Analysis complete: {n_views}/5 role views produced."
-                        )
-                    except DemoPipelineError as exc:
-                        st.error(f"Live run failed: {exc}")
-
-    # Data preview
+def _render_decision_brief() -> None:
+    """Render the first-screen business decision summary."""
+    st.header("Decision Brief")
     prepared = st.session_state.get(_SK_PREPARED)
-    if prepared is not None:
-        st.divider()
-        st.subheader("Data Preview")
-        st.caption(
-            f"Showing up to 10 rows. Full dataset: "
-            f"{prepared.row_count} rows × {prepared.column_count} columns."
-        )
-        if prepared.dataframe_preview_records:
-            import pandas as pd
-            st.dataframe(pd.DataFrame(list(prepared.dataframe_preview_records)), use_container_width=True)
+    if prepared is None:
         st.info(
-            f"**Source scope:** CSV registered as `data_source` (internal_observation). "
-            f"Industry context is external — it cannot be cited as direct company evidence."
+            "1. Load the IBM public demo or upload a CSV\n\n"
+            "2. Prepare deterministic Evidence\n\n"
+            "3. Run IBM Granite for orientation and role views"
         )
-
-
-# ---------------------------------------------------------------------------
-# Tab 2 — Data Health
-# ---------------------------------------------------------------------------
-
-
-def _render_tab_data_health() -> None:
-    st.header("Tab 2 — Data Health")
-
-    prepared: PreparedDemoInputs | None = st.session_state.get(_SK_PREPARED)
-    if prepared is None:
-        st.info("Prepare evidence in Tab 1 first.")
         return
-
-    s = prepared.data_health_summary
-    st.caption(f"Source: `{s.source_id}`")
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Rows", s.row_count)
-    with col2:
-        st.metric("Columns", s.column_count)
-    with col3:
-        dup_label = str(s.duplicate_row_count)
-        if s.duplicate_row_count > 0:
-            st.metric("Duplicate Rows", dup_label)
-            st.warning(f"{s.duplicate_row_count} exact duplicate row(s) detected.")
-        else:
-            st.metric("Duplicate Rows", dup_label)
-
-    st.subheader("Missing Value Rates")
-    cols_with_missing = {c: r for c, r in s.missing_value_rates.items() if r > 0}
-    if cols_with_missing:
-        for col, rate in cols_with_missing.items():
-            pct = round(rate * 100, 1)
-            st.warning(f"**{col}**: {pct}% missing")
-    else:
-        st.success("No missing values detected.")
-
-    st.subheader("Mixed-Type Columns")
-    if s.columns_with_mixed_types:
-        for col in s.columns_with_mixed_types:
-            st.warning(f"Mixed types in column: **{col}**")
-    else:
-        st.success("No mixed-type columns detected.")
-
-    st.subheader("Constant Columns")
-    if s.constant_columns:
-        for col in s.constant_columns:
-            st.warning(f"Constant column (all non-null values identical): **{col}**")
-    else:
-        st.success("No constant columns detected.")
-
-    st.subheader("Schema Issues")
-    if s.schema_issues:
-        for issue in s.schema_issues:
-            st.warning(issue)
-    else:
-        st.success("No schema issues detected.")
-
-    if s.duplicate_row_count > 0 or cols_with_missing:
-        st.warning(
-            "Data quality gaps detected. These are captured as Evidence Objects "
-            "and will affect role views and risk assessment."
-        )
-
-
-# ---------------------------------------------------------------------------
-# Tab 3 — Evidence Board
-# ---------------------------------------------------------------------------
-
-
-def _render_tab_evidence_board() -> None:
-    st.header("Tab 3 — Evidence Board")
-    st.info("**Rule: No Evidence ID, no decision claim.**")
-
-    prepared: PreparedDemoInputs | None = st.session_state.get(_SK_PREPARED)
-    if prepared is None:
-        st.info("Prepare evidence in Tab 1 first.")
-        return
-
-    evidence_objects = prepared.evidence_objects
-    if not evidence_objects:
-        st.warning("No Evidence Objects were produced. Check data and context inputs.")
-        return
-
-    st.caption(f"{len(evidence_objects)} active Evidence Object(s)")
-
-    scope_labels = {
-        EvidenceScope.internal_observation: "Internal Observation",
-        EvidenceScope.external_context: "External Context",
-        EvidenceScope.assumption: "Assumption",
-        EvidenceScope.stated_priority: "Stated Priority",
-    }
-
-    for ev in evidence_objects:
-        scope_label = scope_labels.get(ev.evidence_scope, ev.evidence_scope.value)
-        with st.expander(
-            f"`{ev.evidence_id}` — {scope_label} ({ev.evidence_type})",
-            expanded=False,
-        ):
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown(f"**Evidence ID:** `{ev.evidence_id}`")
-                st.markdown(f"**Evidence Scope:** {scope_label}")
-                st.markdown(f"**Confidence:** {ev.confidence}")
-                st.markdown(f"**Extraction Method:** {ev.extraction_method}")
-                st.markdown(f"**Status:** {ev.status.value}")
-            with col2:
-                st.markdown(f"**Source ID:** `{ev.source_id}`")
-                st.markdown(f"**Evidence Type:** `{ev.evidence_type}`")
-                st.markdown(f"**Relevant Roles:** {', '.join(ev.relevant_roles)}")
-
-            st.markdown("**Finding:**")
-            st.write(ev.finding)
-
-            if ev.supporting_evidence and ev.supporting_evidence != ev.finding:
-                st.markdown("**Supporting Evidence:**")
-                st.write(ev.supporting_evidence)
-
-            st.markdown("**Decision Relevance:**")
-            st.write(ev.decision_relevance)
-
-            if ev.limitations:
-                st.markdown("**Limitations:**")
-                for lim in ev.limitations:
-                    st.caption(f"⚠ {lim}")
-
-            with st.expander("Source Locator", expanded=False):
-                try:
-                    st.json(ev.source_locator.model_dump(mode="json"))
-                except Exception:
-                    st.write(str(ev.source_locator))
-
-
-# ---------------------------------------------------------------------------
-# Tab 4 — RoleLens Views
-# ---------------------------------------------------------------------------
-
-
-def _render_tab_role_views() -> None:
-    st.header("Tab 4 — RoleLens Views")
-    st.caption(
-        "The five roles are policy-constrained views over shared Evidence. "
-        "They are not autonomous AI employees."
-    )
-
-    analysis: DemoAnalysisResult | None = st.session_state.get(_SK_ANALYSIS)
-    if analysis is None:
-        st.info("Run the live analysis in Tab 1 first.")
-        return
-
-    st.subheader("Role Views")
-    for role_key in _ROLE_DISPLAY_ORDER:
-        outcome = analysis.role_outcomes[role_key]
-        display_name = _ROLE_DISPLAY[role_key]
-
-        if isinstance(outcome, RoleView):
-            with st.expander(f"**{display_name}** — Role View", expanded=False):
-                st.markdown(f"**Role Concern:** {outcome.role_concern}")
-                st.markdown(f"**Human Review Required:** {outcome.human_review_required}")
-
-                if outcome.next_action:
-                    st.markdown(f"**Next Action:** {outcome.next_action}")
-                if outcome.dependency:
-                    st.markdown(f"**Dependency:** {outcome.dependency}")
-
-                st.markdown("**Key Findings:**")
-                for i, finding in enumerate(outcome.key_findings):
-                    ev_ids = ", ".join(
-                        f"`{ref.evidence_id}`" for ref in finding.evidence_references
+    analysis = st.session_state.get(_SK_ANALYSIS)
+    label = st.session_state.get(_SK_SOURCE_LABEL, "Prepared source")
+    view = build_decision_brief(prepared, analysis, source_label=label)
+    st.subheader(view.dataset_name)
+    st.caption(f"Source: {view.source_label}")
+    st.info(view.disclosure)
+    st.markdown(f"**Business question:** {view.business_question}")
+    status_col, posture_col = st.columns(2)
+    with status_col:
+        st.metric("Decision status", view.decision_status)
+        st.caption(view.status_detail)
+    with posture_col:
+        st.markdown("**Recommended posture**")
+        st.warning(view.recommended_posture)
+    if view.metrics:
+        for column, metric in zip(st.columns(4), view.metrics):
+            with column:
+                st.metric(metric.label, metric.value, help=metric.help_text)
+    if view.patterns:
+        st.subheader("What the evidence suggests")
+        for column, pattern in zip(st.columns(3), view.patterns):
+            with column:
+                with st.container(border=True):
+                    st.markdown(f"**{pattern.headline}**")
+                    st.write(pattern.explanation)
+                    st.caption(
+                        f"{pattern.source_label} | Evidence: "
+                        + ", ".join(pattern.evidence_ids)
                     )
-                    st.markdown(f"*Claim {i+1}* (confidence: {finding.confidence})")
-                    st.write(finding.claim)
-                    st.caption(f"Evidence: {ev_ids}")
-
-                if outcome.risks_or_assumptions:
-                    st.markdown("**Risks / Assumptions:**")
-                    for r in outcome.risks_or_assumptions:
-                        st.warning(r)
-
-                if outcome.missing_information:
-                    st.markdown("**Missing Information:**")
-                    for m in outcome.missing_information:
-                        st.caption(f"• {m}")
-
-        elif isinstance(outcome, InsufficientEvidence):
-            with st.expander(f"**{display_name}** — Insufficient Evidence", expanded=False):
-                st.error(
-                    f"**Typed Failure: insufficient_evidence**\n\n{outcome.reason}"
-                )
-                st.caption("No role insight or next action was fabricated.")
-
-        elif isinstance(outcome, RoleGenerationFailure):
-            with st.expander(f"**{display_name}** — Generation Failure", expanded=False):
-                st.error(
-                    f"**Typed Failure: {outcome.failure_code}**\n\n"
-                    f"{_safe_role_failure_reason(outcome.failure_code)}"
-                )
-                st.caption("No role insight or next action was fabricated.")
-
-    # Deterministic Risk Review
-    st.subheader("Deterministic Risk Review")
-    risk_result = analysis.deterministic_risk_result
-    if not risk_result.findings:
-        st.success("No deterministic risks detected.")
-    else:
-        st.warning(
-            f"{len(risk_result.findings)} deterministic risk finding(s). "
-            f"Blocking: {risk_result.has_blocking_risks}. "
-            f"Human review required: {risk_result.human_review_required}."
-        )
-        for finding in risk_result.findings:
-            role_name = _ROLE_DISPLAY.get(finding.role_key, finding.role_key.value)
-            blocker_tag = " 🚫 BLOCKING" if finding.blocks_downstream else ""
-            review_tag = " 👁 REVIEW REQUIRED" if finding.requires_human_review else ""
-            ev_ids = ", ".join(f"`{e}`" for e in finding.evidence_ids) if finding.evidence_ids else "N/A"
-            with st.expander(
-                f"`{finding.risk_code.value}` — {role_name} [{finding.severity.value}]{blocker_tag}{review_tag}",
-                expanded=False,
-            ):
-                st.markdown(f"**Message:** {finding.message}")
-                st.markdown(f"**Required Action:** {finding.required_action}")
-                st.markdown(f"**Evidence IDs:** {ev_ids}")
-                if finding.claim_index is not None:
-                    st.caption(f"Claim index: {finding.claim_index}")
-
-    # Semantic Review
-    st.subheader("Granite Semantic Review — probabilistic, non-authoritative")
-    st.caption(
-        "Semantic review is probabilistic. Candidates do not automatically block or approve work. "
-        "likely_supported is not verified truth."
-    )
-    semantic = analysis.semantic_risk_result
-    if not semantic.candidates:
-        st.success("No semantic risk candidates produced.")
-    else:
-        st.info(
-            f"{len(semantic.candidates)} semantic candidate(s). "
-            f"Human review required: {semantic.human_review_required}."
-        )
-        for cand in semantic.candidates:
-            role_name = _ROLE_DISPLAY.get(cand.role_key, cand.role_key.value)
-            ev_ids = ", ".join(f"`{e}`" for e in cand.evidence_ids)
-            with st.expander(
-                f"`{cand.risk_code.value}` — {role_name} claim {cand.claim_index} "
-                f"[{cand.disposition.value}]",
-                expanded=False,
-            ):
-                st.markdown(f"**Explanation:** {cand.explanation}")
-                st.markdown(f"**Review Question:** {cand.review_question}")
-                st.markdown(f"**Evidence IDs:** {ev_ids}")
-                st.markdown(f"**Confidence:** {cand.confidence}")
-                st.markdown(f"**Disposition:** `{cand.disposition.value}`")
-                st.caption("This is a probabilistic candidate — not a verified fact.")
+    if view.orientation_notice:
+        st.warning(view.orientation_notice)
+    if view.guardrails:
+        st.subheader("What the evidence does not authorize")
+        for guardrail in view.guardrails:
+            st.info(guardrail)
+    if analysis is not None:
+        ready = sum(isinstance(value, RoleView) for value in analysis.role_outcomes.values())
+        summary = build_action_plan_summary(analysis)
+        cols = st.columns(3)
+        cols[0].metric("Successful role views", f"{ready}/5")
+        cols[1].metric("Workflow status", summary.plan_status)
+        cols[2].metric("Blocking steps", summary.blocker_count)
 
 
-# ---------------------------------------------------------------------------
-# Tab 5 — Workflow Plan
-# ---------------------------------------------------------------------------
-
-
-def _render_tab_workflow() -> None:
-    st.header("Tab 5 — Workflow Plan")
-
-    analysis: DemoAnalysisResult | None = st.session_state.get(_SK_ANALYSIS)
-    if analysis is None:
-        st.info("Run the live analysis in Tab 1 first.")
+def _render_data_health_detail() -> None:
+    """Render all existing deterministic data-health fields."""
+    prepared = st.session_state.get(_SK_PREPARED)
+    if prepared is None:
+        st.info("Prepare Evidence first.")
         return
-
-    plan = analysis.workflow_plan
+    summary = prepared.data_health_summary
+    st.caption(f"Source: {summary.source_id}")
+    cols = st.columns(3)
+    cols[0].metric("Rows", summary.row_count)
+    cols[1].metric("Columns", summary.column_count)
+    cols[2].metric("Duplicate rows", summary.duplicate_row_count)
+    st.markdown("**Missing value rates**")
+    st.json(summary.missing_value_rates)
+    st.markdown("**Mixed-type columns**")
+    st.write(summary.columns_with_mixed_types or "None")
+    st.markdown("**Constant columns**")
+    st.write(summary.constant_columns or "None")
+    st.markdown("**Schema issues**")
+    st.write(summary.schema_issues or "None")
+    st.markdown("**Complete typed Data Health record**")
+    st.json(summary.model_dump(mode="json"))
+    st.markdown("**Bounded data preview**")
     st.caption(
-        f"Plan status: **{plan.plan_status.value}** | "
-        f"Steps: {len(plan.steps)} | "
-        f"Blocking steps: {len(plan.blocking_step_ids)} | "
-        f"Planning method: {plan.planning_method}"
+        f"Showing up to 10 rows from {prepared.row_count:,} rows and "
+        f"{prepared.column_count} columns."
     )
-
-    if plan.blocking_step_ids:
-        st.error(f"BLOCKED: {', '.join(plan.blocking_step_ids)}")
-
-    if plan.steps:
-        st.subheader("Workflow Steps")
-
-    for step in plan.steps:
-        role_name = _ROLE_DISPLAY.get(step.owner_role, step.owner_role.value)
-        kind_label = _step_kind_label(step.step_kind)
-        status_label = _step_status_label(step.status)
-
-        blocker_tag = " 🚫 BLOCKS DOWNSTREAM" if step.blocks_downstream else ""
-        status_icon = "🔴" if step.status == WorkflowStepStatus.blocked else (
-            "🟡" if step.status == WorkflowStepStatus.pending_human_review else "🟢"
+    if prepared.dataframe_preview_records:
+        st.dataframe(
+            pd.DataFrame(list(prepared.dataframe_preview_records)),
+            use_container_width=True,
+            hide_index=True,
         )
 
-        with st.expander(
-            f"{status_icon} `{step.step_id}` [{step.sequence}] {kind_label} — {role_name}{blocker_tag}",
-            expanded=False,
-        ):
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown(f"**Step ID:** `{step.step_id}`")
-                st.markdown(f"**Kind:** {kind_label}")
-                st.markdown(f"**Owner:** {role_name}")
-                st.markdown(f"**Status:** {status_label}")
-                st.markdown(f"**Blocks Downstream:** {step.blocks_downstream}")
-                st.markdown(f"**Human Review Required:** {step.human_review_required}")
-            with col2:
-                ev_ids = ", ".join(f"`{e}`" for e in step.supporting_evidence_ids) or "None"
-                dep_ids = ", ".join(f"`{d}`" for d in step.dependency_step_ids) or "None"
-                st.markdown(f"**Evidence IDs:** {ev_ids}")
-                st.markdown(f"**Dependencies:** {dep_ids}")
 
-            st.markdown(f"**Action:** {step.action}")
+def _render_data_explained() -> None:
+    """Render deterministic primer and optional Granite orientation."""
+    st.header("Data Explained")
+    prepared = st.session_state.get(_SK_PREPARED)
+    if prepared is None:
+        st.info("Prepare Evidence to explain the selected data source.")
+        return
+    profile = prepared.business_profile
+    if profile is None:
+        st.info("No registered business playbook is active for this source.")
+        _render_data_health_detail()
+        return
+    business_question = prepared.available_inputs["business_question"]
+    primer = build_dataset_primer(profile, business_question=business_question)
+    st.subheader("Deterministic Dataset Primer")
+    st.write(primer.dataset_context)
+    st.markdown(f"**Currency status:** {primer.currency_status}")
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "Field": term.field_name,
+                    "Plain language": term.plain_language,
+                    "Primary use": term.primary_use,
+                    "Caution": term.caution,
+                }
+                for term in primer.glossary_terms
+            ]
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.warning(
+        f"Data quality note: {primer.total_charges_parse_issue_count} "
+        "TotalCharges values have parse issues."
+    )
+    chart1, chart2, chart3 = st.columns(3)
+    with chart1:
+        st.markdown("**Churn rate by Contract**")
+        contract_frame = pd.DataFrame(
+            {
+                "Contract": [item.segment for item in profile.contract_rates],
+                "Recorded churn rate (%)": [
+                    item.churn_rate_pct for item in profile.contract_rates
+                ],
+            }
+        ).set_index("Contract")
+        st.bar_chart(contract_frame)
+    with chart2:
+        st.markdown("**Median tenure by Churn status**")
+        tenure_frame = pd.DataFrame(
+            {
+                "Churn status": [
+                    item.churn_status for item in profile.medians_by_churn_status
+                ],
+                "Median tenure": [
+                    item.median_tenure for item in profile.medians_by_churn_status
+                ],
+            }
+        ).set_index("Churn status")
+        st.bar_chart(tenure_frame)
+    with chart3:
+        st.markdown("**Median MonthlyCharges by Churn status**")
+        charges_frame = pd.DataFrame(
+            {
+                "Churn status": [
+                    item.churn_status for item in profile.medians_by_churn_status
+                ],
+                "Median MonthlyCharges": [
+                    item.median_monthly_charges
+                    for item in profile.medians_by_churn_status
+                ],
+            }
+        ).set_index("Churn status")
+        st.bar_chart(charges_frame)
 
-            if step.dependency_notes:
-                st.markdown("**Dependency Notes:**")
-                for note in step.dependency_notes:
-                    st.caption(f"• {note}")
+    analysis = st.session_state.get(_SK_ANALYSIS)
+    if analysis is None:
+        st.caption("Granite orientation has not run; deterministic facts remain available.")
+        return
+    orientation = analysis.dataset_orientation_outcome
+    if isinstance(orientation, DatasetOrientationFailure):
+        st.warning("IBM Granite orientation was unavailable; the deterministic primer remains available.")
+        return
+    if isinstance(orientation, DatasetOrientationBrief):
+        st.subheader("Explained by IBM Granite")
+        st.write(orientation.dataset_overview)
+        st.markdown(
+            f"**Business question in plain language:** "
+            f"{orientation.business_question_in_plain_language}"
+        )
+        st.markdown("**Terms to know**")
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "Field": term.field_name,
+                        "Explanation": term.explanation,
+                        "Caution": term.caution,
+                    }
+                    for term in orientation.terms_to_know
+                ]
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+        for pattern in orientation.key_patterns:
+            with st.container(border=True):
+                st.markdown(f"**{pattern.headline}**")
+                st.write(pattern.plain_language_explanation)
+                st.caption("Evidence: " + ", ".join(pattern.evidence_ids))
+        st.info(orientation.why_this_matters)
 
-            if step.deterministic_risk_codes:
-                codes = ", ".join(f"`{c.value}`" for c in step.deterministic_risk_codes)
-                st.markdown(f"**Deterministic Risk Codes:** {codes}")
 
-            if step.semantic_risk_codes:
-                codes = ", ".join(f"`{c.value}`" for c in step.semantic_risk_codes)
-                st.markdown(f"**Semantic Risk Codes:** {codes}")
+def _render_role_comparison() -> None:
+    """Render five role contrasts and one selected concise detail."""
+    st.header("Role Comparison")
+    analysis = st.session_state.get(_SK_ANALYSIS)
+    if analysis is None:
+        st.info("Run IBM Granite to compare the five policy-constrained roles.")
+        return
+    rows = build_role_comparison(analysis)
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "Role": row.role_name,
+                    "Primary question": row.primary_question,
+                    "Current focus": row.current_focus,
+                    "Evidence-backed signal": row.evidence_backed_signal,
+                    "Next handoff": row.next_handoff,
+                    "Status": row.status,
+                }
+                for row in rows
+            ]
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+    selected_name = st.selectbox(
+        "Inspect one role",
+        options=[row.role_name for row in rows],
+        key="selected_product_role",
+    )
+    selected = next(row for row in rows if row.role_name == selected_name)
+    outcome = analysis.role_outcomes[selected.role_key]
+    with st.container(border=True):
+        st.subheader(selected.role_name)
+        if isinstance(outcome, RoleView):
+            st.markdown(f"**Role concern:** {outcome.role_concern}")
+            for finding in outcome.key_findings[:3]:
+                evidence_ids = [ref.evidence_id for ref in finding.evidence_references]
+                st.write(finding.claim)
+                st.caption("Evidence: " + ", ".join(evidence_ids))
+            st.markdown(f"**Next action:** {outcome.next_action or 'None identified.'}")
+            st.markdown(f"**Dependency:** {outcome.dependency or 'None identified.'}")
+            st.markdown("**Missing information:**")
+            st.write(outcome.missing_information or "None recorded.")
+        else:
+            st.warning(selected.status)
+            st.write(selected.evidence_backed_signal)
 
-            if step.review_questions:
-                st.markdown("**Review Questions:**")
-                for q in step.review_questions:
-                    st.caption(f"• {q}")
 
-            if step.missing_information:
-                st.markdown("**Missing Information:**")
-                for m in step.missing_information:
-                    st.caption(f"• {m}")
+def _render_step_card(step: Any) -> None:
+    """Render one unchanged WorkflowStep in a compact native container."""
+    with st.container(border=True):
+        st.markdown(f"**{step.step_id} — {_role_name(step.owner_role)}**")
+        st.write(step.action)
+        st.caption(
+            f"Status: {step.status.value} | Evidence: "
+            + (", ".join(step.supporting_evidence_ids) or "None")
+        )
 
-    st.divider()
-    st.subheader("Human Review Controls")
-    st.warning("Simulated review does not authorize execution.")
 
+def _render_action_plan() -> None:
+    """Render bounded blockers and role actions without changing the plan."""
+    st.header("Action Plan")
+    analysis = st.session_state.get(_SK_ANALYSIS)
+    if analysis is None:
+        st.info("Run IBM Granite to produce the deterministic WorkflowPlan.")
+        return
+    summary = build_action_plan_summary(analysis)
+    columns = st.columns(4)
+    columns[0].metric("Plan status", summary.plan_status)
+    columns[1].metric("Total steps", summary.step_count)
+    columns[2].metric("Blockers", summary.blocker_count)
+    columns[3].metric("Semantic review gates", summary.review_gate_count)
+    st.subheader("Priority blockers")
+    if not summary.priority_blockers:
+        st.success("No blocking workflow steps.")
+    for step in summary.priority_blockers:
+        _render_step_card(step)
+    st.subheader("Role-owned actions")
+    if not summary.role_actions:
+        st.info("No role-owned actions are present.")
+    for step in summary.role_actions:
+        _render_step_card(step)
+    st.caption("The complete unchanged WorkflowPlan is preserved in Audit Trail.")
+
+
+def _render_review_controls(plan: WorkflowPlan) -> None:
+    """Render exact per-step simulated-review inputs in one expander."""
     if not plan.steps:
         st.warning("No actionable workflow step was proposed.")
-        no_action_note = st.text_area(
-            "No-action review note",
-            key="review_note_no_action",
-        )
-        if st.button(
-            "Acknowledge no actionable workflow",
-            key="btn_acknowledge_no_action",
-            type="primary",
-        ):
+        note = st.text_area("No-action review note", key="review_note_no_action")
+        if st.button("Acknowledge no actionable workflow", key="btn_acknowledge_no_action"):
             try:
-                _record_empty_workflow_review(
-                    st.session_state,
-                    plan,
-                    no_action_note,
-                )
-                st.success(
-                    "No actionable workflow acknowledged. Go to Tab 6 to "
-                    "compose the Decision Memo."
-                )
+                _record_empty_workflow_review(st.session_state, plan, note)
+                st.success("No actionable workflow acknowledged.")
             except HumanReviewInputError as exc:
                 st.error(f"Review input error: {exc}")
-            except Exception:
-                st.error("No-action review could not be validated.")
         return
-
-    # Preset loader writes actual widget state before controls are built.
-    if st.button(
-        "Synthetic review preset — review before recording",
-        key="btn_load_preset",
-    ):
+    if st.button("Load editable demo review", key="btn_load_preset"):
         _apply_synthetic_review_preset(plan, st.session_state)
-        st.info(
-            "**Synthetic review preset — review before recording.** "
-            "Editable values are loaded into the controls below. "
-            "Review each decision before clicking 'Record simulated human review'."
-        )
-
-    # Per-step decision controls
-    decisions: dict[str, dict[str, Any]] = {}
-
-    for step in plan.steps:
-        role_name = _ROLE_DISPLAY.get(step.owner_role, step.owner_role.value)
-        kind_label = _step_kind_label(step.step_kind)
-        st.markdown(f"**`{step.step_id}`** — {kind_label} ({role_name})")
-        st.caption(step.action[:120] + ("…" if len(step.action) > 120 else ""))
-
-        is_gate = step.step_kind == WorkflowStepKind.semantic_review_gate
-
-        decision_options = ["select", "accept", "reject"]
-        if not is_gate:
-            decision_options.append("revise")
-        decision_key = f"review_decision_{step.step_id}"
-        note_key = f"review_note_{step.step_id}"
-        revised_key = f"review_revised_{step.step_id}"
-        st.session_state.setdefault(decision_key, "select")
-        st.session_state.setdefault(note_key, "")
-        st.session_state.setdefault(revised_key, "")
-
-        decision_val = st.selectbox(
-            f"Decision for {step.step_id}",
-            options=decision_options,
-            key=decision_key,
-            label_visibility="collapsed",
-        )
-
-        note_required = (
-            decision_val == "reject"
-            or decision_val == "revise"
-            or is_gate
-        )
-        reviewer_note = st.text_input(
-            f"Reviewer note for {step.step_id}" + (" (required)" if note_required else ""),
-            key=note_key,
-        )
-
-        revised_action = None
-        if decision_val == "revise" and not is_gate:
-            revised_action = st.text_input(
-                f"Revised action for {step.step_id} (required — must differ from original)",
-                key=revised_key,
+        st.info("Editable demo values loaded; no review has been recorded.")
+    controls: dict[str, dict[str, Any]] = {}
+    with st.expander("Review detailed decisions", expanded=False):
+        previous_role: RoleKey | None = None
+        for step in plan.steps:
+            if step.owner_role is not previous_role:
+                st.subheader(_role_name(step.owner_role))
+                previous_role = step.owner_role
+            st.markdown(f"**{step.step_id}** — {step.action}")
+            is_gate = step.step_kind is WorkflowStepKind.semantic_review_gate
+            options = ["select", "accept", "reject"] + ([] if is_gate else ["revise"])
+            decision_key = f"review_decision_{step.step_id}"
+            note_key = f"review_note_{step.step_id}"
+            revised_key = f"review_revised_{step.step_id}"
+            st.session_state.setdefault(decision_key, "select")
+            st.session_state.setdefault(note_key, "")
+            st.session_state.setdefault(revised_key, "")
+            decision = st.selectbox(
+                f"Decision for {step.step_id}",
+                options=options,
+                key=decision_key,
             )
-
-        decisions[step.step_id] = {
-            "decision": decision_val,
-            "reviewer_note": reviewer_note or None,
-            "revised_action": revised_action or None,
-        }
-
-    st.divider()
-
+            note = st.text_input(f"Reviewer note for {step.step_id}", key=note_key)
+            revised = None
+            if decision == "revise" and not is_gate:
+                revised = st.text_input(
+                    f"Revised action for {step.step_id}",
+                    key=revised_key,
+                )
+            controls[step.step_id] = {
+                "decision": decision,
+                "reviewer_note": note or None,
+                "revised_action": revised or None,
+            }
     if st.button("Record simulated human review", key="btn_record_review", type="primary"):
         try:
-            step_inputs = _build_human_review_inputs(plan, decisions)
+            step_inputs = _build_human_review_inputs(plan, controls)
             session = review_workflow_plan(plan, step_inputs)
             st.session_state[_SK_REVIEW_SESSION] = session
-            if _SK_MEMO in st.session_state:
-                del st.session_state[_SK_MEMO]
+            st.session_state.pop(_SK_MEMO, None)
             if session.human_review_complete:
-                st.success(
-                    "Human review recorded and complete. Go to Tab 6 to "
-                    "compose the Decision Memo."
-                )
+                st.success("Simulated human review recorded and complete.")
             else:
-                pending = len(session.pending_step_ids)
-                st.warning(
-                    f"Review recorded but {pending} step(s) still pending: "
-                    f"{', '.join(session.pending_step_ids)}"
-                )
+                st.warning(f"Review remains pending for {len(session.pending_step_ids)} steps.")
         except HumanReviewInputError as exc:
             st.error(f"Review input error: {exc}")
-        except Exception:
-            st.error("Review input could not be validated.")
 
 
-# ---------------------------------------------------------------------------
-# Tab 6 — Decision Memo
-# ---------------------------------------------------------------------------
-
-
-def _render_tab_memo() -> None:
-    st.header("Tab 6 — Decision Memo")
-
-    review_session = st.session_state.get(_SK_REVIEW_SESSION)
-    analysis: DemoAnalysisResult | None = st.session_state.get(_SK_ANALYSIS)
-
+def _render_review_and_memo() -> None:
+    """Render compact human review and post-review memo summary."""
+    st.header("Review & Memo")
+    analysis = st.session_state.get(_SK_ANALYSIS)
     if analysis is None:
-        st.info("Run the live analysis in Tab 1 first.")
+        st.info("Run IBM Granite before simulated human review.")
         return
-
-    if review_session is None:
-        st.info("Record simulated human review in Tab 5 first.")
-        return
-
-    if not review_session.human_review_complete:
-        st.warning(
-            "Human review is not yet complete. "
-            f"Pending steps: {', '.join(review_session.pending_step_ids)}"
-        )
-        return
-
-    st.caption("Decision Memo is available. Compose to generate.")
-
-    if st.button("Compose reviewed Decision Memo", key="btn_compose_memo", type="primary"):
-        try:
-            memo = compose_decision_memo(
-                workflow_plan=analysis.workflow_plan,
-                human_review_session=review_session,
-                evidence_objects=list(analysis.prepared_inputs.evidence_objects),
-            )
-            st.session_state[_SK_MEMO] = memo
-            st.success(f"Decision Memo composed. Status: {memo.memo_status.value}")
-        except DecisionMemoInputError as exc:
-            st.error(f"Memo composition failed: {exc}")
-        except Exception:
-            st.error("Memo composition failed validation.")
-
+    summary = build_action_plan_summary(analysis)
+    pending = len(analysis.workflow_plan.steps)
+    review_session = st.session_state.get(_SK_REVIEW_SESSION)
+    if review_session is not None:
+        pending = len(review_session.pending_step_ids)
+    columns = st.columns(4)
+    columns[0].metric("Plan steps", summary.step_count)
+    columns[1].metric("Blockers", summary.blocker_count)
+    columns[2].metric("Pending review", pending)
+    columns[3].metric("Semantic gates", summary.review_gate_count)
+    st.warning("Simulated review does not authorize execution.")
+    if review_session is None or not review_session.human_review_complete:
+        _render_review_controls(analysis.workflow_plan)
+        review_session = st.session_state.get(_SK_REVIEW_SESSION)
+    if review_session is not None and review_session.human_review_complete:
+        if st.button("Compose reviewed Decision Memo", key="btn_compose_memo", type="primary"):
+            try:
+                memo = compose_decision_memo(
+                    workflow_plan=analysis.workflow_plan,
+                    human_review_session=review_session,
+                    evidence_objects=list(analysis.prepared_inputs.evidence_objects),
+                )
+                st.session_state[_SK_MEMO] = memo
+                st.success("Decision Memo composed.")
+            except DecisionMemoInputError as exc:
+                st.error(f"Memo composition failed: {exc}")
+            except Exception:
+                st.error("Memo composition failed validation.")
     memo = st.session_state.get(_SK_MEMO)
     if memo is None:
         return
-
-    # 1. Review state
-    st.subheader("1. Review State")
-    status_map = {
-        "reviewed": "Reviewed",
-        "requires_revalidation": "Requires Revalidation (human revisions present)",
-        "blocked": "Blocked (unresolved blockers)",
-        "no_action_acknowledged": "No Action Acknowledged",
-    }
-    st.info(f"**Status:** {status_map.get(memo.memo_status.value, memo.memo_status.value)}")
-    st.write(memo.review_summary)
-    digest_short = memo.plan_digest[:16] + "…"
-    st.caption(f"Plan digest (abbrev): `{digest_short}`")
-    with st.expander("Full plan digest", expanded=False):
-        st.code(memo.plan_digest)
-
-    # 2. Retained action sequence
-    st.subheader("2. Retained Action Sequence")
-    if not memo.retained_actions:
-        st.info("No retained actions.")
-    else:
-        for action in memo.retained_actions:
-            role_name = _ROLE_DISPLAY.get(action.owner_role, action.owner_role.value)
-            origin_label = (
-                "Human revision — evidence support not revalidated"
-                if action.action_origin == DecisionMemoActionOrigin.human_revision
-                else "Accepted (original)"
-            )
-            with st.expander(
-                f"`{action.step_id}` [{action.sequence}] {role_name} — {origin_label}",
-                expanded=False,
-            ):
-                if action.action_origin == DecisionMemoActionOrigin.human_revision:
-                    st.warning("**Human revision — evidence support not revalidated.**")
-                    st.markdown(f"**Original Action:** {action.original_action}")
-                    st.markdown(f"**Revised Action:** {action.action}")
-                else:
-                    st.markdown(f"**Action:** {action.action}")
-
-                if action.reviewer_note:
-                    st.caption(f"Reviewer note: {action.reviewer_note}")
-
-                ev_ids = ", ".join(f"`{e}`" for e in action.supporting_evidence_ids) or "None"
-                st.caption(f"Evidence: {ev_ids}")
-
-                if action.deterministic_risk_codes:
-                    codes = ", ".join(f"`{c.value}`" for c in action.deterministic_risk_codes)
-                    st.caption(f"Deterministic risks: {codes}")
-                if action.semantic_risk_codes:
-                    codes = ", ".join(f"`{c.value}`" for c in action.semantic_risk_codes)
-                    st.caption(f"Semantic risks: {codes}")
-                st.caption(f"Original status: {action.original_status.value}")
-
-    # 3. Semantic review decisions
-    st.subheader("3. Semantic Review Decisions")
-    if not memo.review_gates:
-        st.info("No semantic review gates in this plan.")
-    else:
-        for gate in memo.review_gates:
-            role_name = _ROLE_DISPLAY.get(gate.owner_role, gate.owner_role.value)
-            with st.expander(f"`{gate.step_id}` Semantic Gate — {role_name}", expanded=False):
-                st.markdown(f"**Decision:** {gate.decision.value}")
-                if gate.reviewer_note:
-                    st.write(f"Reviewer note: {gate.reviewer_note}")
-                codes = ", ".join(f"`{c.value}`" for c in gate.semantic_risk_codes)
-                st.caption(f"Semantic risk codes: {codes}")
-                st.caption("Semantic decisions remain probabilistic and non-authoritative.")
-
-    # 4. Rejected steps
-    st.subheader("4. Rejected Steps")
-    if not memo.rejected_steps:
-        st.info("No steps were rejected.")
-    else:
-        for step in memo.rejected_steps:
-            role_name = _ROLE_DISPLAY.get(step.owner_role, step.owner_role.value)
-            with st.expander(f"`{step.step_id}` REJECTED — {role_name}", expanded=False):
-                st.markdown(f"**Original Action:** {step.original_action}")
-                if step.reviewer_note:
-                    st.write(f"Reviewer note: {step.reviewer_note}")
-                st.caption(f"Original status: {step.original_status.value}")
-
-    # 5. Unresolved blockers
-    st.subheader("5. Unresolved Blockers")
-    if not memo.unresolved_blocking_step_ids:
-        st.success("No unresolved blockers.")
-    else:
-        st.error(
-            f"Unresolved blocking steps: "
-            f"{', '.join(f'`{s}`' for s in memo.unresolved_blocking_step_ids)}"
-        )
-        st.caption("Accepting a remediation step does not mark the blocker as complete.")
-
-    # 6. Missing information
-    st.subheader("6. Missing Information")
-    if not memo.missing_information:
-        st.success("No missing information recorded.")
-    else:
-        for mi in memo.missing_information:
-            role_name = _ROLE_DISPLAY.get(mi.owner_role, mi.owner_role.value)
-            st.warning(f"**{role_name}** (`{mi.step_id}`):")
-            for item in mi.items:
-                st.caption(f"• {item}")
-
-    # 7. Evidence cited
-    st.subheader("7. Evidence Cited")
-    if not memo.evidence_items:
-        st.info("No evidence items cited.")
-    else:
-        for item in memo.evidence_items:
-            scope_label = _evidence_scope_label(item.evidence_scope)
-            with st.expander(f"`{item.evidence_id}` — {scope_label}", expanded=False):
-                st.markdown(f"**Source ID:** `{item.source_id}`")
-                st.markdown(f"**Confidence:** {item.confidence}")
-                st.write(item.finding)
-                st.write(item.decision_relevance)
-                if item.limitations:
-                    for lim in item.limitations:
-                        st.caption(f"⚠ {lim}")
-
-    # 8. Control notices
-    st.subheader("8. Control Notices")
-    for notice in memo.control_notices:
+    view = build_memo_summary(memo)
+    st.subheader("Decision Memo summary")
+    columns = st.columns(4)
+    columns[0].metric("Status", view.memo_status)
+    columns[1].metric("Retained", view.retained_count)
+    columns[2].metric("Rejected", view.rejected_count)
+    columns[3].metric("Unresolved blockers", view.unresolved_blocker_count)
+    st.metric("Human revisions", view.revision_count)
+    st.markdown("**Top retained actions**")
+    for action in view.top_retained_actions:
+        st.write(f"{action.step_id}: {action.action}")
+    st.markdown("**Rejected actions**")
+    for action in view.rejected_actions:
+        st.write(f"{action.step_id}: {action.original_action}")
+    if view.unresolved_blocker_count:
+        st.error("Unresolved blockers remain and are not cleared by review.")
+    if view.revision_count:
+        st.warning("Human revisions require evidence revalidation.")
+    st.warning("Simulated review does not authorize execution.")
+    for notice in view.control_notices:
         st.warning(notice)
 
 
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
+def _render_evidence_detail() -> None:
+    """Render every EvidenceObject field, including locator and identity."""
+    prepared = st.session_state.get(_SK_PREPARED)
+    if prepared is None:
+        st.info("Prepare Evidence first.")
+        return
+    st.info("Rule: No Evidence ID, no decision claim.")
+    for evidence in prepared.evidence_objects:
+        with st.expander(
+            f"{evidence.evidence_id} — {evidence.evidence_scope.value} "
+            f"({evidence.evidence_type})"
+        ):
+            st.json(evidence.model_dump(mode="json"))
+
+
+def _render_roles_and_risks_detail() -> None:
+    """Render complete role outputs and both risk result types."""
+    analysis = st.session_state.get(_SK_ANALYSIS)
+    if analysis is None:
+        st.info("Run IBM Granite first.")
+        return
+    for role_key in _ROLE_DISPLAY_ORDER:
+        outcome = analysis.role_outcomes[role_key]
+        with st.expander(_role_name(role_key)):
+            if isinstance(outcome, RoleView):
+                st.json(outcome.model_dump(mode="json"))
+            elif isinstance(outcome, InsufficientEvidence):
+                st.error("Typed failure: insufficient_evidence")
+                st.write(outcome.reason)
+            elif isinstance(outcome, RoleGenerationFailure):
+                st.error(f"Typed failure: {outcome.failure_code}")
+                st.write(_safe_role_failure_reason(outcome.failure_code))
+    st.subheader("Deterministic risks")
+    st.json(analysis.deterministic_risk_result.model_dump(mode="json"))
+    st.subheader("Semantic candidates")
+    st.json(analysis.semantic_risk_result.model_dump(mode="json"))
+
+
+def _render_workflow_detail() -> None:
+    """Render the complete unchanged WorkflowPlan and lineage."""
+    analysis = st.session_state.get(_SK_ANALYSIS)
+    if analysis is None:
+        st.info("Run IBM Granite first.")
+        return
+    plan = analysis.workflow_plan
+    st.caption(
+        f"Status: {plan.plan_status.value} | Method: {plan.planning_method} | "
+        f"Human review required: {plan.human_review_required}"
+    )
+    st.json(
+        {
+            "plan_status": plan.plan_status.value,
+            "included_role_keys": [value.value for value in plan.included_role_keys],
+            "blocking_step_ids": plan.blocking_step_ids,
+            "human_review_required": plan.human_review_required,
+            "planning_method": plan.planning_method,
+        }
+    )
+    for step in plan.steps:
+        with st.expander(f"{step.step_id} — {_role_name(step.owner_role)}"):
+            st.json(step.model_dump(mode="json"))
+    if not plan.steps:
+        st.info("No actionable workflow steps.")
+
+
+def _render_memo_detail() -> None:
+    """Render the complete memo, all sections, and Evidence appendix."""
+    memo = st.session_state.get(_SK_MEMO)
+    if memo is None:
+        st.info("Compose the reviewed Decision Memo first.")
+        return
+    st.json(memo.model_dump(mode="json"))
+
+
+def _render_audit_trail() -> None:
+    """Render dense secondary inspection surfaces for full provenance."""
+    st.header("Audit Trail")
+    health, evidence, roles, workflow, memo = st.tabs(
+        ["Data Health", "Evidence", "Roles & Risks", "Full Workflow", "Full Decision Memo"]
+    )
+    with health:
+        _render_data_health_detail()
+    with evidence:
+        _render_evidence_detail()
+    with roles:
+        _render_roles_and_risks_detail()
+    with workflow:
+        _render_workflow_detail()
+    with memo:
+        _render_memo_detail()
 
 
 def main() -> None:
-    """Render the full RoleLens Streamlit application."""
-    st.set_page_config(
-        page_title="RoleLens",
-        page_icon="🔎",
-        layout="wide",
-    )
+    """Render the six-tab RoleLens product experience."""
+    st.set_page_config(page_title="RoleLens", page_icon="🔎", layout="wide")
     _render_header()
-
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "Intake",
-        "Data Health",
-        "Evidence Board",
-        "RoleLens Views",
-        "Workflow Plan",
-        "Decision Memo",
-    ])
-
-    with tab1:
-        _render_tab_intake()
-
-    with tab2:
-        _render_tab_data_health()
-
-    with tab3:
-        _render_tab_evidence_board()
-
-    with tab4:
-        _render_tab_role_views()
-
-    with tab5:
-        _render_tab_workflow()
-
-    with tab6:
-        _render_tab_memo()
+    _render_sidebar_setup()
+    tabs = st.tabs(
+        [
+            "Decision Brief",
+            "Data Explained",
+            "Role Comparison",
+            "Action Plan",
+            "Review & Memo",
+            "Audit Trail",
+        ]
+    )
+    with tabs[0]:
+        _render_decision_brief()
+    with tabs[1]:
+        _render_data_explained()
+    with tabs[2]:
+        _render_role_comparison()
+    with tabs[3]:
+        _render_action_plan()
+    with tabs[4]:
+        _render_review_and_memo()
+    with tabs[5]:
+        _render_audit_trail()
 
 
 if __name__ == "__main__":

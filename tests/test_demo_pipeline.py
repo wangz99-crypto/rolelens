@@ -1001,11 +1001,16 @@ def test_streamlit_app_smoke() -> None:
 
     from app.demo_pipeline import DemoPipelineError
     from app.main import (
+        DEMO_SOURCE_CUSTOM,
+        DEMO_SOURCE_IBM_TELCO,
+        DEMO_SOURCE_NONE,
+        DEMO_SOURCE_SYNTHETIC_FIXTURE,
+        _apply_ibm_telco_sample,
         _apply_synthetic_sample,
         _handle_csv_uploader_change,
         _invalidate_prepared_demo_state,
         _prepare_demo_inputs_transaction,
-        _resolve_csv_input,
+        _resolve_demo_source,
         _run_live_demo_analysis_transaction,
     )
 
@@ -1015,20 +1020,31 @@ def test_streamlit_app_smoke() -> None:
 
     # Read the source and check structural markers
     source = pathlib.Path(main_path).read_text(encoding="utf-8")
+    assert 'with st.expander("Source Locator"' not in source
 
     # Six tab names must appear in the source
-    for tab_name in ["Intake", "Data Health", "Evidence Board", "RoleLens Views",
-                     "Workflow Plan", "Decision Memo"]:
+    for tab_name in [
+        "Decision Brief",
+        "Data Explained",
+        "Role Comparison",
+        "Action Plan",
+        "Review & Memo",
+        "Audit Trail",
+    ]:
         assert tab_name in source, f"Tab '{tab_name}' must be present in app/main.py"
 
-    # Sample loader button
-    assert "Load synthetic B2B SaaS demo" in source, (
-        "Sample loader button must be present"
+    assert "Load IBM Telco public demo" in source
+    assert "Load synthetic QA fixture" in source
+    assert source.index('with st.expander("Advanced / QA"') < source.index(
+        "uploaded_file = st.file_uploader("
     )
 
     # Live run button
-    assert "Run RoleLens with IBM Granite" in source, (
+    assert "Run with IBM Granite" in source, (
         "Live run button must be present"
+    )
+    assert source.index("except DemoPipelineError as exc:") < source.index(
+        "except ValueError as exc:"
     )
 
     # No mock/offline fallback option text
@@ -1059,6 +1075,16 @@ def test_streamlit_app_smoke() -> None:
     py_compile.compile(pipeline_path, doraise=True)
 
     sidecar = json.loads(_DEMO_JSON_PATH.read_text(encoding="utf-8"))
+    public_context_path = (
+        pathlib.Path(__file__).parent.parent
+        / "sample_data"
+        / "public"
+        / "ibm_telco_customer_churn_context.json"
+    )
+    public_csv_path = public_context_path.with_name(
+        "ibm_telco_customer_churn.csv"
+    )
+    public_context = json.loads(public_context_path.read_text(encoding="utf-8"))
     widget_state: dict[str, Any] = {
         "rolelens_prepared_inputs": "old-prepared",
         "rolelens_analysis_result": "old-analysis",
@@ -1105,7 +1131,10 @@ def test_streamlit_app_smoke() -> None:
     assert {
         key: widget_state[key] for key in expected_widget_values
     } == expected_widget_values
-    assert widget_state["demo_use_sample_csv"] is True
+    assert (
+        widget_state["demo_source_mode"]
+        == DEMO_SOURCE_SYNTHETIC_FIXTURE
+    )
     assert "rolelens_prepared_inputs" not in widget_state
     assert "rolelens_analysis_result" not in widget_state
     assert "rolelens_review_session" not in widget_state
@@ -1116,7 +1145,7 @@ def test_streamlit_app_smoke() -> None:
     callback_state = dict(widget_state)
     callback_state.update(
         {
-            "demo_use_sample_csv": True,
+            "demo_source_mode": DEMO_SOURCE_SYNTHETIC_FIXTURE,
             "csv_uploader": "new-custom-upload",
             "rolelens_prepared_inputs": "old-prepared",
             "rolelens_analysis_result": "old-analysis",
@@ -1128,11 +1157,9 @@ def test_streamlit_app_smoke() -> None:
     )
     with patch("app.main.st.session_state", callback_state):
         _handle_csv_uploader_change()
-    assert callback_state["demo_use_sample_csv"] is False
+    assert callback_state["demo_source_mode"] == DEMO_SOURCE_CUSTOM
     assert callback_state["csv_uploader"] == "new-custom-upload"
-    assert {
-        key: callback_state[key] for key in expected_widget_values
-    } == expected_widget_values
+    assert all(callback_state[key] == "" for key in expected_widget_values)
     assert callback_state["unrelated_application_state"] == "keep"
     assert "rolelens_prepared_inputs" not in callback_state
     assert "rolelens_analysis_result" not in callback_state
@@ -1145,23 +1172,42 @@ def test_streamlit_app_smoke() -> None:
         name="custom.csv",
         getvalue=MagicMock(return_value=b"custom,csv\n1,2\n"),
     )
-    sample_bytes, sample_filename = _resolve_csv_input(
-        fake_upload,
-        True,
+    sample_bytes, sample_filename, sample_profile, sample_label = (
+        _resolve_demo_source(DEMO_SOURCE_SYNTHETIC_FIXTURE, fake_upload)
     )
     assert sample_bytes == _DEMO_CSV_PATH.read_bytes()
     assert sample_filename == _DEMO_CSV_PATH.name
+    assert sample_profile is None
+    assert sample_label == "Synthetic B2B SaaS QA fixture"
     fake_upload.getvalue.assert_not_called()
 
-    upload_bytes, upload_filename = _resolve_csv_input(
-        fake_upload,
-        False,
+    upload_bytes, upload_filename, upload_profile, upload_label = (
+        _resolve_demo_source(DEMO_SOURCE_CUSTOM, fake_upload)
     )
     assert upload_bytes == b"custom,csv\n1,2\n"
     assert upload_filename == "custom.csv"
+    assert upload_profile is None
+    assert upload_label == "Custom upload: custom.csv"
     fake_upload.getvalue.assert_called_once_with()
     with pytest.raises(ValueError, match="No CSV source is selected"):
-        _resolve_csv_input(None, False)
+        _resolve_demo_source(DEMO_SOURCE_NONE, None)
+
+    ibm_state = dict(widget_state)
+    ibm_state["csv_uploader"] = fake_upload
+    _apply_ibm_telco_sample(public_context, ibm_state)
+    assert ibm_state["demo_source_mode"] == DEMO_SOURCE_IBM_TELCO
+    assert "csv_uploader" not in ibm_state
+    assert (
+        ibm_state["field_industry_context"]
+        == public_context["dataset_context"]
+    )
+    ibm_bytes, ibm_filename, ibm_profile, ibm_label = (
+        _resolve_demo_source(DEMO_SOURCE_IBM_TELCO, fake_upload)
+    )
+    assert ibm_bytes == public_csv_path.read_bytes()
+    assert ibm_filename == public_csv_path.name
+    assert ibm_profile == "ibm_telco_churn_v1"
+    assert ibm_label == "IBM Telco public demo"
 
     transactional_state: dict[str, Any] = {
         "rolelens_prepared_inputs": "successful-prepared",
@@ -1181,6 +1227,8 @@ def test_streamlit_app_smoke() -> None:
         "business_question": "What changed?",
         "decision_goal": "Review the evidence.",
         "user_assumption": None,
+        "business_profile_id": None,
+        "source_label": "Custom upload: stable.csv",
     }
     with patch(
         "app.main.prepare_demo_inputs",
@@ -1273,24 +1321,33 @@ def test_streamlit_app_smoke() -> None:
         app_test = AppTest.from_file(main_path, default_timeout=15).run()
         assert not app_test.exception
         assert [tab.label for tab in app_test.tabs] == [
-            "Intake",
+            "Decision Brief",
+            "Data Explained",
+            "Role Comparison",
+            "Action Plan",
+            "Review & Memo",
+            "Audit Trail",
             "Data Health",
-            "Evidence Board",
-            "RoleLens Views",
-            "Workflow Plan",
-            "Decision Memo",
+            "Evidence",
+            "Roles & Risks",
+            "Full Workflow",
+            "Full Decision Memo",
         ]
         sample_button = next(
             button
             for button in app_test.button
-            if button.label == "Load synthetic B2B SaaS demo"
+            if button.label == "Load synthetic QA fixture"
         )
         app_test = sample_button.click().run()
 
         assert not app_test.exception
         for key, expected_value in expected_widget_values.items():
             assert app_test.session_state[key] == expected_value
-        assert app_test.session_state["demo_use_sample_csv"] is True
+        assert (
+            app_test.session_state["demo_source_mode"]
+            == DEMO_SOURCE_SYNTHETIC_FIXTURE
+        )
+        assert app_test.session_state["csv_uploader"] is None
         assert role_factory.call_count == 0
         assert semantic_factory.call_count == 0
 
@@ -1325,4 +1382,7 @@ def test_streamlit_app_smoke() -> None:
             app_test.session_state[key] == ""
             for key in expected_widget_values
         )
-        assert app_test.session_state["demo_use_sample_csv"] is False
+        assert (
+            app_test.session_state["demo_source_mode"]
+            == DEMO_SOURCE_NONE
+        )
