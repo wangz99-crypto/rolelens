@@ -11,6 +11,7 @@ Defines all Pydantic v2 models for:
   - EvidenceReference
   - HealthFindingCandidate
   - TextEvidenceCandidate  (Task 5B-1)
+  - BusinessFindingCandidate (Task 10C-1)
   - RoleKey                (Task 6A-1)
   - GroundedFinding        (Task 6A-1)
   - RoleView               (Task 6A-1)
@@ -20,7 +21,8 @@ This module validates ID format and digest format only.
 
 Architecture invariants enforced here:
   - HealthFindingCandidate has no evidence_id field (minting boundary).
-  - TextEvidenceCandidate has no evidence_id or identity_digest (minting boundary).
+  - TextEvidenceCandidate and BusinessFindingCandidate have no evidence_id or
+    identity_digest (minting boundary).
   - RoleView requires at least one GroundedFinding — no evidence means no RoleView.
   - EvidenceStatus contains only "active" and "invalidated".
   - Cross-object reference existence is NOT validated here.
@@ -52,6 +54,7 @@ _ID_ALGO_VERSION_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,31}$")
 _EVIDENCE_TYPE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _CLAIM_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$")
 _CLAIM_KEY_MAX_LEN = 128
+_BUSINESS_PROFILE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 
 # ---------------------------------------------------------------------------
@@ -917,6 +920,123 @@ class HealthFindingCandidate(ContractModel):
         """source_format and source_locator must be compatible."""
         _validate_format_locator_compat(
             self.source_format, self.source_locator, "HealthFindingCandidate"
+        )
+        return self
+
+
+# ---------------------------------------------------------------------------
+# Task 10C-1 — deterministic business-profile finding candidate
+# ---------------------------------------------------------------------------
+
+
+class BusinessFindingCandidate(ContractModel):
+    """Approved aggregate business finding awaiting Evidence ID minting.
+
+    The candidate carries deterministic identity inputs and display fields,
+    but intentionally has no ``evidence_id`` or ``identity_digest``. Only
+    :mod:`app.evidence_builder` may convert it into an EvidenceObject.
+    """
+
+    source_id: str
+    source_format: SourceFormat
+    source_locator: SourceLocator
+    evidence_type: str
+    canonical_rule_parameters: dict[str, Any]
+    normalized_claim_key: str
+    finding: str
+    supporting_evidence: str
+    confidence: Literal["low", "medium", "high"]
+    limitations: list[str]
+    relevant_roles: list[str]
+    decision_relevance: str
+    business_profile_id: str
+
+    @field_validator("source_id")
+    @classmethod
+    def source_id_format(cls, value: str) -> str:
+        """Require the standard registered-source identifier syntax."""
+        return _validate_source_id(value)
+
+    @field_validator("evidence_type")
+    @classmethod
+    def evidence_type_syntax(cls, value: str) -> str:
+        """Require the standard stable Evidence type syntax."""
+        return _validate_evidence_type(value)
+
+    @field_validator("normalized_claim_key")
+    @classmethod
+    def claim_key_syntax(cls, value: str) -> str:
+        """Require a bounded normalized dotted claim key."""
+        if len(value) > _CLAIM_KEY_MAX_LEN or not _CLAIM_KEY_RE.fullmatch(
+            value
+        ):
+            raise ValueError(
+                "normalized_claim_key must use normalized dotted-key syntax "
+                f"and contain at most {_CLAIM_KEY_MAX_LEN} characters"
+            )
+        return value
+
+    @field_validator("canonical_rule_parameters")
+    @classmethod
+    def rule_parameters_json_compatible(
+        cls,
+        value: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Require recursively canonical JSON-compatible rule parameters."""
+        _validate_json_value(value, path="canonical_rule_parameters")
+        return value
+
+    @field_validator("finding", "supporting_evidence", "decision_relevance")
+    @classmethod
+    def text_non_blank(cls, value: str, info: Any) -> str:
+        """Reject blank human-readable candidate fields."""
+        if not value or not value.strip():
+            raise ValueError(f"{info.field_name} must not be blank")
+        return value
+
+    @field_validator("limitations")
+    @classmethod
+    def limitations_non_blank_unique(
+        cls,
+        values: list[str],
+    ) -> list[str]:
+        """Reject blank or duplicate limitation statements."""
+        if any(not value or not value.strip() for value in values):
+            raise ValueError("limitations must not contain blank values")
+        if len(values) != len(set(values)):
+            raise ValueError("limitations must not contain duplicates")
+        return values
+
+    @field_validator("relevant_roles")
+    @classmethod
+    def relevant_roles_non_empty_unique(
+        cls,
+        values: list[str],
+    ) -> list[str]:
+        """Require at least one distinct non-blank role key."""
+        _validate_relevant_roles(values)
+        if len(values) != len(set(values)):
+            raise ValueError("relevant_roles must not contain duplicates")
+        return values
+
+    @field_validator("business_profile_id")
+    @classmethod
+    def business_profile_id_syntax(cls, value: str) -> str:
+        """Require a bounded, normalized playbook identifier."""
+        if not _BUSINESS_PROFILE_ID_RE.fullmatch(value):
+            raise ValueError(
+                "business_profile_id must match "
+                "^[a-z0-9][a-z0-9._-]{0,63}$"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def format_locator_compatible(self) -> "BusinessFindingCandidate":
+        """Require the locator subtype appropriate to the physical format."""
+        _validate_format_locator_compat(
+            self.source_format,
+            self.source_locator,
+            "BusinessFindingCandidate",
         )
         return self
 
@@ -2314,4 +2434,581 @@ class HumanReviewSession(ContractModel):
             raise ValueError(
                 "human_review_complete must match session_status"
             )
+        return self
+
+
+# ---------------------------------------------------------------------------
+# Task 9B — deterministic post-review Decision Memo contracts
+# ---------------------------------------------------------------------------
+
+
+class DecisionMemoStatus(str, Enum):
+    """Derived status of a deterministic post-review memo."""
+
+    blocked = "blocked"
+    requires_revalidation = "requires_revalidation"
+    reviewed = "reviewed"
+    no_action_acknowledged = "no_action_acknowledged"
+
+
+class DecisionMemoActionOrigin(str, Enum):
+    """Provenance of one retained memo action."""
+
+    accepted_original = "accepted_original"
+    human_revision = "human_revision"
+
+
+class DecisionMemoEvidenceItem(ContractModel):
+    """Exact active-Evidence snapshot included in a DecisionMemo."""
+
+    evidence_id: str
+    source_id: str
+    evidence_scope: EvidenceScope
+    finding: str
+    confidence: Literal["low", "medium", "high"]
+    limitations: list[str]
+    decision_relevance: str
+
+    @field_validator("evidence_id")
+    @classmethod
+    def evidence_id_format(cls, value: str) -> str:
+        """Require the existing Evidence Object ID contract."""
+        return _validate_evidence_id(value)
+
+    @field_validator("source_id")
+    @classmethod
+    def source_id_format(cls, value: str) -> str:
+        """Require the existing source ID contract."""
+        return _validate_source_id(value)
+
+    @field_validator("finding", "decision_relevance")
+    @classmethod
+    def evidence_text_non_blank(
+        cls,
+        value: str,
+        info: Any,
+    ) -> str:
+        """Reject blank evidence snapshot text."""
+        if not value or not value.strip():
+            raise ValueError(f"{info.field_name} must not be blank")
+        return value
+
+    @field_validator("limitations")
+    @classmethod
+    def limitations_non_blank_unique(
+        cls,
+        values: list[str],
+    ) -> list[str]:
+        """Reject blank or duplicate evidence limitations."""
+        _validate_str_list_no_blank_or_dup(values, "limitations")
+        return values
+
+
+class _DecisionMemoStepLineage(ContractModel):
+    """Shared validated lineage fields for memo step records."""
+
+    step_id: str
+    sequence: int = Field(..., ge=1)
+    owner_role: RoleKey
+    supporting_evidence_ids: list[str]
+    deterministic_risk_codes: list[RiskCode]
+    semantic_risk_codes: list[SemanticRiskCode]
+    original_status: WorkflowStepStatus
+    blocks_downstream: bool
+
+    @field_validator("step_id")
+    @classmethod
+    def step_id_format(cls, value: str) -> str:
+        """Require the existing WorkflowStep identifier contract."""
+        if not _WORKFLOW_STEP_ID_RE.fullmatch(value):
+            raise ValueError("step_id must match wf-[0-9]{3}")
+        return value
+
+    @field_validator("supporting_evidence_ids")
+    @classmethod
+    def supporting_evidence_valid_unique(
+        cls,
+        values: list[str],
+    ) -> list[str]:
+        """Require valid, duplicate-free Evidence Object IDs."""
+        for evidence_id in values:
+            _validate_evidence_id(evidence_id)
+        if len(values) != len(set(values)):
+            raise ValueError(
+                "supporting_evidence_ids must not contain duplicates"
+            )
+        return values
+
+    @field_validator("deterministic_risk_codes", "semantic_risk_codes")
+    @classmethod
+    def risk_codes_unique(
+        cls,
+        values: list[Any],
+        info: Any,
+    ) -> list[Any]:
+        """Reject duplicate risk-code lineage."""
+        if len(values) != len(set(values)):
+            raise ValueError(f"{info.field_name} must not contain duplicates")
+        return values
+
+
+class DecisionMemoAction(_DecisionMemoStepLineage):
+    """One retained accepted-original or human-revised workflow action."""
+
+    step_kind: WorkflowStepKind
+    original_action: str
+    action: str
+    action_origin: DecisionMemoActionOrigin
+    reviewer_note: str | None
+    revision_requires_revalidation: bool
+
+    @field_validator("original_action", "action")
+    @classmethod
+    def action_text_non_blank(cls, value: str, info: Any) -> str:
+        """Require non-blank original and final action text."""
+        if not value or not value.strip():
+            raise ValueError(f"{info.field_name} must not be blank")
+        return value
+
+    @field_validator("reviewer_note")
+    @classmethod
+    def reviewer_note_non_blank(cls, value: str | None) -> str | None:
+        """Reject a blank reviewer note when supplied."""
+        if value is not None and (not value or not value.strip()):
+            raise ValueError("reviewer_note must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def retained_action_is_consistent(self) -> "DecisionMemoAction":
+        """Enforce kind, origin, Evidence, and revision invariants."""
+        if self.step_kind == WorkflowStepKind.semantic_review_gate:
+            raise ValueError(
+                "semantic_review_gate cannot be a DecisionMemoAction"
+            )
+        if (
+            self.step_kind == WorkflowStepKind.role_action
+            and not self.supporting_evidence_ids
+        ):
+            raise ValueError(
+                "role_action requires at least one supporting Evidence ID"
+            )
+        if self.action_origin == DecisionMemoActionOrigin.accepted_original:
+            if self.action != self.original_action:
+                raise ValueError(
+                    "accepted_original action must equal original_action"
+                )
+            if self.revision_requires_revalidation:
+                raise ValueError(
+                    "accepted_original cannot require revalidation"
+                )
+        else:
+            if self.action == self.original_action:
+                raise ValueError(
+                    "human_revision action must differ from original_action"
+                )
+            if self.reviewer_note is None:
+                raise ValueError("human_revision requires reviewer_note")
+            if not self.revision_requires_revalidation:
+                raise ValueError(
+                    "human_revision requires revalidation"
+                )
+        return self
+
+
+class DecisionMemoReviewGate(ContractModel):
+    """Audit record for one documented probabilistic semantic gate."""
+
+    step_id: str
+    sequence: int = Field(..., ge=1)
+    owner_role: RoleKey
+    decision: HumanReviewDecision
+    reviewer_note: str
+    supporting_evidence_ids: list[str]
+    semantic_risk_codes: list[SemanticRiskCode]
+    original_status: WorkflowStepStatus
+    blocks_downstream: bool
+
+    @field_validator("step_id")
+    @classmethod
+    def step_id_format(cls, value: str) -> str:
+        """Require the existing WorkflowStep identifier contract."""
+        if not _WORKFLOW_STEP_ID_RE.fullmatch(value):
+            raise ValueError("step_id must match wf-[0-9]{3}")
+        return value
+
+    @field_validator("reviewer_note")
+    @classmethod
+    def reviewer_note_required(cls, value: str) -> str:
+        """Require a written gate-handling note."""
+        if not value or not value.strip():
+            raise ValueError("reviewer_note must not be blank")
+        return value
+
+    @field_validator("supporting_evidence_ids")
+    @classmethod
+    def gate_evidence_valid_unique(cls, values: list[str]) -> list[str]:
+        """Require valid, non-empty, unique gate Evidence IDs."""
+        if not values:
+            raise ValueError(
+                "review gate supporting_evidence_ids must not be empty"
+            )
+        for evidence_id in values:
+            _validate_evidence_id(evidence_id)
+        if len(values) != len(set(values)):
+            raise ValueError(
+                "supporting_evidence_ids must not contain duplicates"
+            )
+        return values
+
+    @field_validator("semantic_risk_codes")
+    @classmethod
+    def gate_codes_non_empty_unique(
+        cls,
+        values: list[SemanticRiskCode],
+    ) -> list[SemanticRiskCode]:
+        """Require non-empty, duplicate-free semantic gate lineage."""
+        if not values:
+            raise ValueError(
+                "review gate semantic_risk_codes must not be empty"
+            )
+        if len(values) != len(set(values)):
+            raise ValueError(
+                "semantic_risk_codes must not contain duplicates"
+            )
+        return values
+
+    @model_validator(mode="after")
+    def review_gate_is_non_authoritative(self) -> "DecisionMemoReviewGate":
+        """Enforce documented, nonblocking accept/reject gate semantics."""
+        if self.decision not in {
+            HumanReviewDecision.accept,
+            HumanReviewDecision.reject,
+        }:
+            raise ValueError("review gate decision must be accept or reject")
+        if self.original_status != WorkflowStepStatus.pending_human_review:
+            raise ValueError(
+                "review gate original_status must be pending_human_review"
+            )
+        if self.blocks_downstream:
+            raise ValueError("review gate cannot block downstream")
+        return self
+
+
+class DecisionMemoRejectedStep(_DecisionMemoStepLineage):
+    """Auditable rejected non-gate workflow step."""
+
+    step_kind: WorkflowStepKind
+    original_action: str
+    reviewer_note: str
+
+    @field_validator("original_action", "reviewer_note")
+    @classmethod
+    def rejected_text_non_blank(cls, value: str, info: Any) -> str:
+        """Require original action and rejection explanation."""
+        if not value or not value.strip():
+            raise ValueError(f"{info.field_name} must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def rejected_step_is_not_gate(self) -> "DecisionMemoRejectedStep":
+        """Route semantic gates exclusively to DecisionMemoReviewGate."""
+        if self.step_kind == WorkflowStepKind.semantic_review_gate:
+            raise ValueError(
+                "semantic_review_gate cannot be a DecisionMemoRejectedStep"
+            )
+        return self
+
+
+class DecisionMemoMissingInformation(ContractModel):
+    """Missing information retained for one role-action step."""
+
+    step_id: str
+    owner_role: RoleKey
+    items: list[str]
+
+    @field_validator("step_id")
+    @classmethod
+    def step_id_format(cls, value: str) -> str:
+        """Require the existing WorkflowStep identifier contract."""
+        if not _WORKFLOW_STEP_ID_RE.fullmatch(value):
+            raise ValueError("step_id must match wf-[0-9]{3}")
+        return value
+
+    @field_validator("items")
+    @classmethod
+    def items_non_empty_unique(cls, values: list[str]) -> list[str]:
+        """Require distinct non-blank missing-information items."""
+        if not values:
+            raise ValueError("items must not be empty")
+        _validate_str_list_no_blank_or_dup(values, "items")
+        return values
+
+
+class DecisionMemo(ContractModel):
+    """Deterministic structured record composed after complete human review."""
+
+    plan_digest: str
+    plan_step_ids: list[str]
+    memo_status: DecisionMemoStatus
+    review_summary: str
+    evidence_items: list[DecisionMemoEvidenceItem]
+    retained_actions: list[DecisionMemoAction]
+    review_gates: list[DecisionMemoReviewGate]
+    rejected_steps: list[DecisionMemoRejectedStep]
+    missing_information: list[DecisionMemoMissingInformation]
+    deterministic_risk_codes: list[RiskCode]
+    semantic_risk_codes: list[SemanticRiskCode]
+    unresolved_blocking_step_ids: list[str]
+    human_revision_step_ids: list[str]
+    overall_review_note: str | None
+    no_action_acknowledged: bool = Field(strict=True)
+    human_review_complete: bool
+    control_notices: list[str]
+    review_method: Literal["simulated_human_review_v1"]
+    memo_method: Literal["deterministic_post_review_v1"]
+
+    @field_validator("plan_digest")
+    @classmethod
+    def plan_digest_format(cls, value: str) -> str:
+        """Require a full lowercase SHA-256 digest."""
+        if not _DIGEST_RE.fullmatch(value):
+            raise ValueError(
+                "plan_digest must be 64 lowercase hexadecimal characters"
+            )
+        return value
+
+    @field_validator(
+        "plan_step_ids",
+        "unresolved_blocking_step_ids",
+        "human_revision_step_ids",
+    )
+    @classmethod
+    def step_id_lists_valid_unique(
+        cls,
+        values: list[str],
+        info: Any,
+    ) -> list[str]:
+        """Require valid, duplicate-free workflow ID lists."""
+        if any(not _WORKFLOW_STEP_ID_RE.fullmatch(value) for value in values):
+            raise ValueError(
+                f"{info.field_name} values must match wf-[0-9]{{3}}"
+            )
+        if len(values) != len(set(values)):
+            raise ValueError(f"{info.field_name} must not contain duplicates")
+        return values
+
+    @field_validator("review_summary")
+    @classmethod
+    def review_summary_non_blank(cls, value: str) -> str:
+        """Require a deterministic process summary."""
+        if not value or not value.strip():
+            raise ValueError("review_summary must not be blank")
+        return value
+
+    @field_validator("overall_review_note")
+    @classmethod
+    def overall_note_non_blank(cls, value: str | None) -> str | None:
+        """Reject a blank overall review note when supplied."""
+        if value is not None and (not value or not value.strip()):
+            raise ValueError("overall_review_note must not be blank")
+        return value
+
+    @field_validator("deterministic_risk_codes", "semantic_risk_codes")
+    @classmethod
+    def aggregate_risk_codes_unique(
+        cls,
+        values: list[Any],
+        info: Any,
+    ) -> list[Any]:
+        """Reject duplicate aggregate risk codes."""
+        if len(values) != len(set(values)):
+            raise ValueError(f"{info.field_name} must not contain duplicates")
+        return values
+
+    @field_validator("control_notices")
+    @classmethod
+    def control_notices_non_empty_unique(
+        cls,
+        values: list[str],
+    ) -> list[str]:
+        """Require distinct non-blank process control notices."""
+        if not values:
+            raise ValueError("control_notices must not be empty")
+        _validate_str_list_no_blank_or_dup(values, "control_notices")
+        return values
+
+    @model_validator(mode="after")
+    def memo_lineage_is_consistent(self) -> "DecisionMemo":
+        """Validate sections, derived lineage, status, and empty-plan state."""
+        primary_records = [
+            *self.retained_actions,
+            *self.review_gates,
+            *self.rejected_steps,
+        ]
+        primary_ids = [record.step_id for record in primary_records]
+        if len(primary_ids) != len(set(primary_ids)):
+            raise ValueError(
+                "primary memo section step IDs must be unique"
+            )
+        if set(primary_ids) != set(self.plan_step_ids) or len(
+            primary_ids
+        ) != len(self.plan_step_ids):
+            raise ValueError(
+                "primary memo sections must partition plan_step_ids exactly"
+            )
+
+        for section_name, records in (
+            ("retained_actions", self.retained_actions),
+            ("review_gates", self.review_gates),
+            ("rejected_steps", self.rejected_steps),
+        ):
+            sequences = [record.sequence for record in records]
+            if sequences != sorted(sequences):
+                raise ValueError(
+                    f"{section_name} must be ordered by sequence"
+                )
+            section_ids = [record.step_id for record in records]
+            if len(section_ids) != len(set(section_ids)):
+                raise ValueError(
+                    f"{section_name} step IDs must be unique"
+                )
+            for record in records:
+                expected_sequence = (
+                    self.plan_step_ids.index(record.step_id) + 1
+                )
+                if record.sequence != expected_sequence:
+                    raise ValueError(
+                        f"{section_name} sequence must match plan_step_ids"
+                    )
+
+        primary_by_id = {
+            record.step_id: record for record in primary_records
+        }
+        ordered_primary = [
+            primary_by_id[step_id] for step_id in self.plan_step_ids
+        ]
+
+        expected_revisions = [
+            record.step_id
+            for record in ordered_primary
+            if isinstance(record, DecisionMemoAction)
+            and record.action_origin
+            == DecisionMemoActionOrigin.human_revision
+        ]
+        if self.human_revision_step_ids != expected_revisions:
+            raise ValueError(
+                "human_revision_step_ids must match retained revisions"
+            )
+        expected_blockers = [
+            record.step_id
+            for record in ordered_primary
+            if record.blocks_downstream
+        ]
+        if self.unresolved_blocking_step_ids != expected_blockers:
+            raise ValueError(
+                "unresolved_blocking_step_ids must match blocking records"
+            )
+
+        expected_deterministic_codes: list[RiskCode] = []
+        expected_semantic_codes: list[SemanticRiskCode] = []
+        expected_evidence_ids: list[str] = []
+        for record in ordered_primary:
+            for code in getattr(record, "deterministic_risk_codes", []):
+                if code not in expected_deterministic_codes:
+                    expected_deterministic_codes.append(code)
+            for code in record.semantic_risk_codes:
+                if code not in expected_semantic_codes:
+                    expected_semantic_codes.append(code)
+            for evidence_id in record.supporting_evidence_ids:
+                if evidence_id not in expected_evidence_ids:
+                    expected_evidence_ids.append(evidence_id)
+        if self.deterministic_risk_codes != expected_deterministic_codes:
+            raise ValueError(
+                "deterministic_risk_codes must match primary section lineage"
+            )
+        if self.semantic_risk_codes != expected_semantic_codes:
+            raise ValueError(
+                "semantic_risk_codes must match primary section lineage"
+            )
+
+        evidence_item_ids = [
+            item.evidence_id for item in self.evidence_items
+        ]
+        if len(evidence_item_ids) != len(set(evidence_item_ids)):
+            raise ValueError("evidence_items IDs must be unique")
+        if evidence_item_ids != expected_evidence_ids:
+            raise ValueError(
+                "evidence_items must match primary section Evidence lineage"
+            )
+
+        missing_ids = [
+            record.step_id for record in self.missing_information
+        ]
+        if len(missing_ids) != len(set(missing_ids)):
+            raise ValueError(
+                "missing_information step IDs must be unique"
+            )
+        expected_missing_order = [
+            step_id
+            for step_id in self.plan_step_ids
+            if step_id in set(missing_ids)
+        ]
+        if missing_ids != expected_missing_order:
+            raise ValueError(
+                "missing_information must preserve plan order"
+            )
+        for record in self.missing_information:
+            primary = primary_by_id.get(record.step_id)
+            if not isinstance(
+                primary,
+                (DecisionMemoAction, DecisionMemoRejectedStep),
+            ) or primary.step_kind != WorkflowStepKind.role_action:
+                raise ValueError(
+                    "missing_information must reference role_action steps"
+                )
+            if primary.owner_role != record.owner_role:
+                raise ValueError(
+                    "missing_information owner_role must match its step"
+                )
+
+        if not self.plan_step_ids:
+            if primary_records or self.evidence_items or self.missing_information:
+                raise ValueError(
+                    "empty-plan memo cannot contain step or Evidence sections"
+                )
+            if (
+                self.unresolved_blocking_step_ids
+                or self.human_revision_step_ids
+                or self.deterministic_risk_codes
+                or self.semantic_risk_codes
+            ):
+                raise ValueError(
+                    "empty-plan memo cannot contain derived step lineage"
+                )
+            if not self.no_action_acknowledged:
+                raise ValueError(
+                    "empty-plan memo requires no_action_acknowledged"
+                )
+            if self.overall_review_note is None:
+                raise ValueError(
+                    "empty-plan memo requires overall_review_note"
+                )
+            expected_status = DecisionMemoStatus.no_action_acknowledged
+        else:
+            if self.no_action_acknowledged:
+                raise ValueError(
+                    "non-empty memo cannot acknowledge no action"
+                )
+            if self.unresolved_blocking_step_ids:
+                expected_status = DecisionMemoStatus.blocked
+            elif self.human_revision_step_ids:
+                expected_status = DecisionMemoStatus.requires_revalidation
+            else:
+                expected_status = DecisionMemoStatus.reviewed
+        if self.memo_status != expected_status:
+            raise ValueError(
+                "memo_status is inconsistent with derived memo state"
+            )
+        if not self.human_review_complete:
+            raise ValueError("human_review_complete must always be true")
         return self

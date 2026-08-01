@@ -12,6 +12,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Sequence
 
+from app.business_profile import (
+    BusinessDatasetProfile,
+    build_business_profile,
+)
 from app.context_evidence import extract_context_evidence
 from app.data_health import analyze_data_health
 from app.data_parser import parse_csv
@@ -63,6 +67,7 @@ class PreparedDemoInputs:
         dataframe_preview_records:  Bounded preview rows as list-of-dicts.
         row_count:                  Total CSV row count.
         column_count:               Total CSV column count.
+        business_profile:           Opt-in deterministic business profile.
     """
 
     source_manifests: tuple[SourceManifestEntry, ...]
@@ -72,6 +77,7 @@ class PreparedDemoInputs:
     dataframe_preview_records: tuple[dict[str, Any], ...]
     row_count: int
     column_count: int
+    business_profile: BusinessDatasetProfile | None = None
 
 
 @dataclass(frozen=True)
@@ -193,6 +199,7 @@ def prepare_demo_inputs(
     business_question: str,
     decision_goal: str,
     user_assumption: str | None,
+    business_profile_id: str | None = None,
 ) -> PreparedDemoInputs:
     """Deterministically prepare pipeline inputs from raw demo materials.
 
@@ -227,6 +234,28 @@ def prepare_demo_inputs(
         # 3. Data health
         data_health_summary, health_candidates = analyze_data_health(df, csv_manifest)
 
+    except Exception:
+        raise DemoPipelineError(
+            "Evidence preparation failed. Check CSV structure and required "
+            "context inputs."
+        ) from None
+
+    business_profile: BusinessDatasetProfile | None = None
+    business_candidates = ()
+    if business_profile_id is not None:
+        try:
+            business_profile, business_candidates = build_business_profile(
+                df,
+                csv_manifest,
+                profile_id=business_profile_id,
+            )
+        except Exception:
+            raise DemoPipelineError(
+                "Business profiling failed. Check the selected playbook and "
+                "dataset structure."
+            ) from None
+
+    try:
         # 4a. Industry context → TextEvidenceCandidate(s)
         industry_extraction = extract_context_evidence(
             industry_context,
@@ -281,6 +310,7 @@ def prepare_demo_inputs(
 
     # Collect all evidence candidates
     all_candidates: list = list(health_candidates)
+    all_candidates.extend(business_candidates)
     all_candidates.extend(industry_extraction.candidates)
     all_candidates.extend(strategy_extraction.candidates)
     if assumption_extraction is not None:
@@ -315,6 +345,7 @@ def prepare_demo_inputs(
         dataframe_preview_records=tuple(preview_rows),
         row_count=len(df),
         column_count=df.shape[1],
+        business_profile=business_profile,
     )
 
 

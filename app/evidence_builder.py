@@ -50,6 +50,7 @@ from app.identity import (
     generate_evidence_id,
 )
 from app.schemas import (
+    BusinessFindingCandidate,
     EvidenceObject,
     EvidenceScope,
     EvidenceStatus,
@@ -62,7 +63,11 @@ from app.schemas import (
 )
 
 
-EvidenceCandidate = HealthFindingCandidate | TextEvidenceCandidate
+EvidenceCandidate = (
+    HealthFindingCandidate
+    | TextEvidenceCandidate
+    | BusinessFindingCandidate
+)
 """Explicit union of candidate schemas approved for evidence minting."""
 
 
@@ -378,8 +383,9 @@ def build_evidence(
       not an error — a clean dataset produces no health findings.
 
     Args:
-        candidates:       Sequence of HealthFindingCandidate or TextEvidenceCandidate
-                          values. Must not contain evidence_id fields (schema-enforced).
+        candidates:       Sequence of HealthFindingCandidate,
+                          TextEvidenceCandidate, or BusinessFindingCandidate
+                          values. Must not contain evidence_id fields.
         source_manifests: Sequence of SourceManifestEntry values providing provenance for
                           each candidate.  Every candidate's source_id must
                           appear in this list.
@@ -443,6 +449,21 @@ def build_evidence(
             }
             or manifest.source_format
             not in {SourceFormat.csv, SourceFormat.excel}
+        ):
+            raise CandidateContractMismatchError(
+                source_id=candidate.source_id,
+                candidate_type=type(candidate).__name__,
+                manifest_semantic_context_category=(
+                    manifest.semantic_context_category.value
+                ),
+                manifest_source_format=manifest.source_format.value,
+            )
+
+        if isinstance(candidate, BusinessFindingCandidate) and (
+            manifest.semantic_context_category
+            is not SemanticContextCategory.data_source
+            or manifest.source_format is not SourceFormat.csv
+            or manifest.source_scope is not SourceScope.internal_observation
         ):
             raise CandidateContractMismatchError(
                 source_id=candidate.source_id,
