@@ -47,6 +47,23 @@ export interface RevisionEvidenceSummary extends EvidenceSummary {
   source_provenance_unchanged: boolean;
 }
 
+export interface EvidenceDetail {
+  evidence_id: string;
+  evidence_type: string;
+  label: string;
+  finding: string;
+  confidence: "low" | "medium" | "high";
+  extraction_method: "deterministic" | "llm_assisted";
+  scope:
+    | "internal_observation"
+    | "external_context"
+    | "stated_priority"
+    | "assumption";
+  source_label: "IBM Telco public demo";
+  limitations: string[];
+  relevant_roles: RoleKey[];
+}
+
 export interface Assumption {
   assumption_id: string;
   key: string;

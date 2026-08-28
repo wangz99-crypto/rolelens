@@ -37,6 +37,7 @@ _PUBLIC_CSV = _ROOT / "sample_data" / "public" / "ibm_telco_customer_churn.csv"
 _PUBLIC_CONTEXT = _ROOT / "sample_data" / "public" / "ibm_telco_customer_churn_context.json"
 _BUSINESS_PROFILE_ID = "ibm_telco_churn_v1"
 _PRODUCT_ERROR = "RoleLens could not load the demo decision safely."
+_EVIDENCE_ERROR = "Evidence details could not be loaded safely."
 _INVALID_ASSUMPTIONS_ERROR = "Decision assumptions are invalid."
 _RECALCULATION_ERROR = "RoleLens could not recalculate the demo decision safely."
 _DISCLOSURE = "This is a fictional IBM sample dataset, not real customer production data."
@@ -50,6 +51,16 @@ _BUSINESS_EVIDENCE_TYPES = (
     "business_churn_medians",
     "business_parseability",
 )
+
+_EVIDENCE_LABELS = {
+    "business_overall_churn": "Overall recorded churn",
+    "business_contract_churn": "Recorded churn by contract",
+    "business_support_churn": "Recorded churn by tech support",
+    "business_internet_churn": "Recorded churn by internet service",
+    "business_payment_churn": "Recorded churn by payment method",
+    "business_churn_medians": "Churn-status medians",
+    "business_parseability": "TotalCharges parseability",
+}
 
 _ROLE_KEY = Literal[
     "executive", "data_analyst", "data_engineer", "sales_marketing", "project_manager"
@@ -113,6 +124,23 @@ class RevisionEvidenceSummaryResponse(EvidenceSummaryResponse):
     observed_evidence_unchanged: bool
     data_health_unchanged: bool
     source_provenance_unchanged: bool
+
+
+class EvidenceDetailResponse(_ProductContract):
+    """Bounded product-depth projection of one approved Evidence Object."""
+
+    evidence_id: str
+    evidence_type: str
+    label: str
+    finding: str
+    confidence: Literal["low", "medium", "high"]
+    extraction_method: Literal["deterministic", "llm_assisted"]
+    scope: Literal[
+        "internal_observation", "external_context", "stated_priority", "assumption"
+    ]
+    source_label: Literal["IBM Telco public demo"]
+    limitations: tuple[str, ...]
+    relevant_roles: tuple[_ROLE_KEY, ...]
 
 
 class AssumptionResponse(_ProductContract):
@@ -314,15 +342,20 @@ def _prepare_product_context() -> _PreparedProductContext:
     profile = prepared.business_profile
     if profile is None:
         raise ValueError("The approved business profile is unavailable.")
-    business_evidence = tuple(
+    selected_evidence = tuple(
         evidence for evidence in prepared.evidence_objects
         if evidence.evidence_type in _BUSINESS_EVIDENCE_TYPES and evidence.status.value == "active"
     )
-    selected_types = tuple(evidence.evidence_type for evidence in business_evidence)
-    if len(business_evidence) != 7 or set(selected_types) != set(_BUSINESS_EVIDENCE_TYPES):
+    selected_types = tuple(evidence.evidence_type for evidence in selected_evidence)
+    if len(selected_evidence) != 7 or set(selected_types) != set(_BUSINESS_EVIDENCE_TYPES):
         raise ValueError("The governed evidence basis is incomplete.")
     if len(selected_types) != len(set(selected_types)):
         raise ValueError("The governed evidence basis contains duplicates.")
+    evidence_by_type = {item.evidence_type: item for item in selected_evidence}
+    business_evidence = tuple(
+        evidence_by_type[evidence_type]
+        for evidence_type in _BUSINESS_EVIDENCE_TYPES
+    )
     if any(evidence.source_id != prepared.data_health_summary.source_id for evidence in business_evidence):
         raise ValueError("The governed evidence source is inconsistent.")
     month_to_month = next(item for item in profile.contract_rates if item.segment == "Month-to-month")
@@ -357,6 +390,27 @@ def _evidence_response(context: _PreparedProductContext) -> EvidenceSummaryRespo
         total_charges_parse_issue_count=context.profile.total_charges_parse_issue_count,
         data_health_checked=True,
         source_provenance_locked=True,
+    )
+
+
+def _evidence_detail_response(
+    context: _PreparedProductContext,
+) -> tuple[EvidenceDetailResponse, ...]:
+    """Project the ordered governed Evidence Objects without internal payloads."""
+    return tuple(
+        EvidenceDetailResponse(
+            evidence_id=item.evidence_id,
+            evidence_type=item.evidence_type,
+            label=_EVIDENCE_LABELS[item.evidence_type],
+            finding=item.finding,
+            confidence=item.confidence,
+            extraction_method=item.extraction_method,
+            scope=item.evidence_scope.value,
+            source_label="IBM Telco public demo",
+            limitations=tuple(item.limitations),
+            relevant_roles=tuple(item.relevant_roles),
+        )
+        for item in context.business_evidence
     )
 
 
@@ -585,6 +639,18 @@ def get_demo_decision() -> DemoDecisionResponse:
         return _build_demo_decision()
     except Exception:
         raise HTTPException(status_code=503, detail=_PRODUCT_ERROR) from None
+
+
+@app.get(
+    "/api/demo/decision/evidence",
+    response_model=tuple[EvidenceDetailResponse, ...],
+)
+def get_demo_decision_evidence() -> tuple[EvidenceDetailResponse, ...]:
+    """Return only the seven ordered approved business Evidence Objects."""
+    try:
+        return _evidence_detail_response(_prepare_product_context())
+    except Exception:
+        raise HTTPException(status_code=503, detail=_EVIDENCE_ERROR) from None
 
 
 @app.post("/api/demo/decision/recalculate", response_model=RecalculatedDecisionResponse)

@@ -12,6 +12,7 @@ export interface RenderableRoleState {
 
 export interface RoleNodeData extends Record<string, unknown> {
   role: RenderableRoleState;
+  onOpen: (roleKey: RoleKey) => void;
 }
 
 const icons = {
@@ -39,28 +40,34 @@ const badgeTones: Record<ImpactKind, string> = {
 };
 
 export function RoleNode({ data }: NodeProps) {
-  const role = (data as RoleNodeData).role;
+  const { role, onOpen } = data as RoleNodeData;
   const Icon = icons[role.roleKey];
   const baselineFoundationTone = role.foundation && role.impactKind === "current"
     ? "border-cyan-400/30 bg-[#10202b]"
     : tones[role.impactKind];
   return (
-    <div
-      data-testid={`role-node-${role.roleKey}`}
-      className={`w-[188px] rounded-xl border px-4 py-3 transition-colors duration-300 ${baselineFoundationTone}`}
-    >
+    <div className={`w-[188px] rounded-xl border transition-colors duration-300 ${baselineFoundationTone}`}>
       <Handle type="target" position={Position.Top} className="!border-0 !bg-transparent" />
       <Handle type="target" position={Position.Left} className="!border-0 !bg-transparent" />
-      <div className="flex items-center gap-2">
-        <span className="grid size-7 place-items-center rounded-lg bg-slate-700/40 text-slate-300">
-          <Icon size={14} aria-hidden="true" />
+      <button
+        type="button"
+        data-testid={`role-node-${role.roleKey}`}
+        aria-label={`Open ${role.label} Role Lens`}
+        onClick={() => onOpen(role.roleKey)}
+        style={{ pointerEvents: "auto" }}
+        className="nodrag nopan pointer-events-auto block w-full rounded-xl px-4 py-3 text-left outline-none transition hover:bg-white/[0.025] focus-visible:ring-2 focus-visible:ring-cyan-300/70"
+      >
+        <span className="flex items-center gap-2">
+          <span className="grid size-7 place-items-center rounded-lg bg-slate-700/40 text-slate-300">
+            <Icon size={14} aria-hidden="true" />
+          </span>
+          <span className="min-w-0 flex-1 text-xs font-semibold text-slate-100">{role.label}</span>
+          <span className={`rounded px-1.5 py-0.5 text-[8px] font-bold tracking-[0.1em] ${badgeTones[role.impactKind]}`}>
+            {role.impactKind.toUpperCase()}
+          </span>
         </span>
-        <span className="min-w-0 flex-1 text-xs font-semibold text-slate-100">{role.label}</span>
-        <span className={`rounded px-1.5 py-0.5 text-[8px] font-bold tracking-[0.1em] ${badgeTones[role.impactKind]}`}>
-          {role.impactKind.toUpperCase()}
-        </span>
-      </div>
-      <p className="mt-2 text-[11px] leading-4 text-slate-300/80">{role.state}</p>
+        <span className="mt-2 block text-[11px] leading-4 text-slate-300/80">{role.state}</span>
+      </button>
       <Handle type="source" position={Position.Right} className="!border-0 !bg-transparent" />
       <Handle type="source" position={Position.Bottom} className="!border-0 !bg-transparent" />
     </div>

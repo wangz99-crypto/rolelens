@@ -491,6 +491,73 @@ def test_post_uses_only_dd3_entry_and_leaks_no_internal_snapshots(
         assert forbidden not in serialized
 
 
+def test_evidence_detail_endpoint_returns_exact_real_ordered_projection() -> None:
+    """The depth endpoint is an exact bounded view of seven real Evidence Objects."""
+    context = product_api._prepare_product_context()
+    response = TestClient(product_api.app).get("/api/demo/decision/evidence")
+    assert response.status_code == 200
+    result = response.json()
+    assert [item["evidence_type"] for item in result] == list(
+        product_api._BUSINESS_EVIDENCE_TYPES
+    )
+    assert len(result) == 7
+    for detail, evidence in zip(result, context.business_evidence, strict=True):
+        assert detail == {
+            "evidence_id": evidence.evidence_id,
+            "evidence_type": evidence.evidence_type,
+            "label": product_api._EVIDENCE_LABELS[evidence.evidence_type],
+            "finding": evidence.finding,
+            "confidence": evidence.confidence,
+            "extraction_method": evidence.extraction_method,
+            "scope": evidence.evidence_scope.value,
+            "source_label": "IBM Telco public demo",
+            "limitations": evidence.limitations,
+            "relevant_roles": evidence.relevant_roles,
+        }
+
+
+def test_evidence_detail_endpoint_excludes_unapproved_and_internal_fields() -> None:
+    """Depth exposes product fields, never other scopes or provenance internals."""
+    response = TestClient(product_api.app).get("/api/demo/decision/evidence")
+    assert response.status_code == 200
+    result = response.json()
+    assert all(item["scope"] == "internal_observation" for item in result)
+    assert all(item["evidence_type"] in _EXPECTED_EVIDENCE_TYPES for item in result)
+    serialized = response.text.lower()
+    for forbidden in (
+        "identity_digest",
+        "source_locator",
+        "source_manifest",
+        "snapshot_json",
+        "supporting_evidence",
+        "canonical_rule",
+        "external_context",
+        '"assumption"',
+        '"health',
+    ):
+        assert forbidden not in serialized
+
+
+def test_evidence_detail_failure_is_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Evidence preparation failures retain no raw source or diagnostic text."""
+    secret = "secret source_locator snapshot_json https://errors.pydantic.dev"
+
+    def failing_context() -> None:
+        raise RuntimeError(secret)
+
+    monkeypatch.setattr(product_api, "_prepare_product_context", failing_context)
+    response = TestClient(product_api.app, raise_server_exceptions=False).get(
+        "/api/demo/decision/evidence"
+    )
+    assert response.status_code == 503
+    assert response.json() == {"detail": product_api._EVIDENCE_ERROR}
+    assert secret not in response.text
+    assert "traceback" not in response.text.lower()
+    assert "pydantic" not in response.text.lower()
+
+
 def test_unexpected_recalculation_failure_is_sanitized(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

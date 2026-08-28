@@ -19,6 +19,7 @@ import { RoleNode, type RenderableRoleState, type RoleNodeData } from "./RoleNod
 
 interface ImpactMapProps {
   data: ProductDecision;
+  onRoleSelect: (roleKey: RoleKey) => void;
 }
 
 const positions: Record<RoleKey, { x: number; y: number }> = {
@@ -58,12 +59,16 @@ function renderableRoles(data: ProductDecision): RenderableRoleState[] {
   }));
 }
 
-function buildNodes(data: ProductDecision, roles: RenderableRoleState[]): Node[] {
+function buildNodes(
+  data: ProductDecision,
+  roles: RenderableRoleState[],
+  onRoleSelect: (roleKey: RoleKey) => void,
+): Node[] {
   const roleNodes: Node<RoleNodeData>[] = roles.map((role) => ({
     id: role.roleKey,
     type: "role",
     position: positions[role.roleKey],
-    data: { role },
+    data: { role, onOpen: onRoleSelect },
     draggable: false,
     selectable: false,
   }));
@@ -98,7 +103,7 @@ function buildEdges(roles: RenderableRoleState[]): Edge[] {
   });
 }
 
-export function ImpactMap({ data }: ImpactMapProps) {
+export function ImpactMap({ data, onRoleSelect }: ImpactMapProps) {
   const roles = renderableRoles(data);
   return (
     <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-800 bg-[#0d141e]" aria-labelledby="impact-map-title">
@@ -111,7 +116,7 @@ export function ImpactMap({ data }: ImpactMapProps) {
       </div>
       <div className="min-h-0 flex-1" data-testid="impact-map">
         <ReactFlow
-          nodes={buildNodes(data, roles)}
+          nodes={buildNodes(data, roles, onRoleSelect)}
           edges={buildEdges(roles)}
           nodeTypes={nodeTypes}
           fitView

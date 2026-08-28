@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import {
   demoDecisionFixture,
+  evidenceDetailFixture,
   heroRevisionFixture,
   sevenPercentRevisionFixture,
 } from "./test/fixture";
@@ -21,19 +22,28 @@ function postCalls() {
   return vi.mocked(fetch).mock.calls.filter(([, options]) => options?.method === "POST");
 }
 
-describe("RoleLens Slice 2 flow", () => {
+function evidenceCalls() {
+  return vi.mocked(fetch).mock.calls.filter(([input]) =>
+    String(input).endsWith("/api/demo/decision/evidence"),
+  );
+}
+
+describe("RoleLens Slice 3 flow", () => {
   beforeEach(() => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockImplementation((url: string) =>
-        Promise.resolve(
+      vi.fn().mockImplementation((input: RequestInfo | URL) => {
+        const url = String(input);
+        return Promise.resolve(
           jsonResponse(
-            url.includes("recalculate")
+            url.endsWith("/evidence")
+              ? evidenceDetailFixture
+              : url.includes("recalculate")
               ? heroRevisionFixture
               : demoDecisionFixture,
           ),
-        ),
-      ),
+        );
+      }),
     );
   });
 
@@ -231,6 +241,192 @@ describe("RoleLens Slice 2 flow", () => {
     );
     expect(screen.getByText("Not evaluable")).toHaveClass("text-amber-200");
     expect(screen.getByText("NOT EVALUABLE")).toHaveClass("text-amber-200");
+  });
+
+  it("loads Evidence lazily once, shows seven items, and expands bounded detail", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await enterDecisionRoom(user);
+    expect(evidenceCalls()).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "View Evidence" }));
+    const drawer = await screen.findByRole("dialog", { name: "Evidence Foundation" });
+    expect(evidenceCalls()).toHaveLength(1);
+    for (const item of evidenceDetailFixture) {
+      expect(within(drawer).getByText(item.label)).toBeInTheDocument();
+    }
+    expect(within(drawer).queryByText(evidenceDetailFixture[0].evidence_id)).not.toBeInTheDocument();
+
+    await user.click(within(drawer).getByRole("button", { name: /Overall recorded churn/i }));
+    expect(within(drawer).getByText(evidenceDetailFixture[0].evidence_id)).toBeInTheDocument();
+    expect(within(drawer).getByText("Deterministic")).toBeInTheDocument();
+    expect(within(drawer).getAllByText("Observed evidence").length).toBeGreaterThanOrEqual(1);
+    expect(within(drawer).getByText(evidenceDetailFixture[0].limitations[0], { exact: false })).toBeInTheDocument();
+
+    await user.click(within(drawer).getByRole("button", { name: "Close drawer" }));
+    await user.click(screen.getByRole("button", { name: "View Evidence" }));
+    await screen.findByRole("dialog", { name: "Evidence Foundation" });
+    expect(evidenceCalls()).toHaveLength(1);
+  });
+
+  it("keeps the Decision Room intact when Evidence detail loading fails", async () => {
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) =>
+      Promise.resolve(
+        String(input).endsWith("/evidence")
+          ? jsonResponse({}, false)
+          : jsonResponse(demoDecisionFixture),
+      ),
+    );
+    const user = userEvent.setup();
+    render(<App />);
+    await enterDecisionRoom(user);
+    await user.click(screen.getByRole("button", { name: "View Evidence" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Evidence details could not be loaded safely.",
+    );
+    expect(screen.getByRole("heading", { name: "Customer Retention Pilot" })).toBeInTheDocument();
+    expect(screen.getAllByText("+5,000 USD")).toHaveLength(2);
+  });
+
+  it("shows trusted Hero depth for Sales, Analyst, and Data Engineer", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await enterDecisionRoom(user);
+    const lift = screen.getByLabelText("Expected lift (%)");
+    await user.clear(lift);
+    await user.type(lift, "3");
+    await user.click(screen.getByRole("button", { name: "Recalculate Impact" }));
+    await screen.findByText("REV-002 · HUMAN REVISION");
+
+    await user.click(screen.getByTestId("role-node-sales_marketing"));
+    let drawer = await screen.findByRole("dialog", { name: "Sales / Marketing" });
+    expect(within(drawer).getAllByText(/Blocked by scenario/i).length).toBeGreaterThanOrEqual(1);
+    expect(within(drawer).getByText("BLOCKED")).toBeInTheDocument();
+    expect(within(drawer).getByText("-7,500 USD")).toBeInTheDocument();
+    expect(within(drawer).getByText("8% → 3%", { exact: false })).toBeInTheDocument();
+    expect(within(drawer).getByText("Overall recorded churn")).toBeInTheDocument();
+    expect(within(drawer).queryByText("TotalCharges parseability")).not.toBeInTheDocument();
+    expect(within(drawer).getByText("IBM Granite Brief")).toBeInTheDocument();
+    expect(within(drawer).getByText("NOT GENERATED")).toBeInTheDocument();
+
+    await user.click(within(drawer).getByRole("button", { name: "Close drawer" }));
+    await user.click(screen.getByTestId("role-node-data_analyst"));
+    drawer = await screen.findByRole("dialog", { name: "Data Analyst" });
+    expect(within(drawer).getAllByText("Evidence basis remains valid").length).toBeGreaterThanOrEqual(1);
+    expect(within(drawer).getByText("UNCHANGED")).toBeInTheDocument();
+    expect(within(drawer).getByText("Scenario revisions do not rewrite observed Evidence.")).toBeInTheDocument();
+    expect(within(drawer).queryByText("Current Scenario")).not.toBeInTheDocument();
+    expect(within(drawer).getByText("NOT GENERATED")).toBeInTheDocument();
+
+    await user.click(within(drawer).getByRole("button", { name: "Close drawer" }));
+    await user.click(screen.getByTestId("role-node-data_engineer"));
+    drawer = await screen.findByRole("dialog", { name: "Data Engineer" });
+    expect(within(drawer).getAllByText("Data foundation remains valid").length).toBeGreaterThanOrEqual(1);
+    expect(within(drawer).getByText("Data Health unchanged")).toBeInTheDocument();
+    expect(within(drawer).getByText("Source provenance unchanged")).toBeInTheDocument();
+    expect(within(drawer).getByText("TotalCharges parseability")).toBeInTheDocument();
+    expect(within(drawer).queryByText("Overall recorded churn")).not.toBeInTheDocument();
+    expect(within(drawer).getByText("NOT GENERATED")).toBeInTheDocument();
+    expect(evidenceCalls()).toHaveLength(1);
+  });
+
+  it("shows an honest baseline-only Revision History before recalculation", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await enterDecisionRoom(user);
+    await user.click(screen.getByRole("button", { name: "Open Revision History" }));
+
+    const drawer = await screen.findByRole("dialog", { name: "Revision History" });
+    const baseline = within(drawer).getByTestId("revision-rev-001");
+    expect(within(baseline).getByText("CURRENT")).toBeInTheDocument();
+    expect(within(baseline).getByText("8%")).toBeInTheDocument();
+    expect(within(baseline).getByText("+5,000 USD")).toBeInTheDocument();
+    expect(within(drawer).getByText("No human revision has been calculated in this session.")).toBeInTheDocument();
+    expect(within(drawer).queryByTestId("revision-rev-002")).not.toBeInTheDocument();
+  });
+
+  it("shows the accepted 8% to 3% revision and unchanged foundations", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await enterDecisionRoom(user);
+    const lift = screen.getByLabelText("Expected lift (%)");
+    await user.clear(lift);
+    await user.type(lift, "3");
+    await user.click(screen.getByRole("button", { name: "Recalculate Impact" }));
+    await screen.findByText("REV-002 · HUMAN REVISION");
+    await user.click(screen.getByRole("button", { name: "Open Revision History" }));
+
+    const drawer = await screen.findByRole("dialog", { name: "Revision History" });
+    const revision = within(drawer).getByTestId("revision-rev-002");
+    expect(within(revision).getByText("8% → 3%")).toBeInTheDocument();
+    expect(within(revision).getByText("+5,000 USD → -7,500 USD")).toBeInTheDocument();
+    expect(within(revision).getByText("Clears → Does not clear")).toBeInTheDocument();
+    expect(within(revision).getByText("Executive").nextSibling).toHaveTextContent("CHANGED");
+    expect(within(revision).getByText("Sales / Marketing").nextSibling).toHaveTextContent("BLOCKED");
+    expect(within(revision).getByText("Project Manager").nextSibling).toHaveTextContent("CHANGED");
+    expect(within(revision).getByText("7 Evidence Objects").nextSibling).toHaveTextContent("UNCHANGED");
+  });
+
+  it("replaces REV-002 with the latest accepted 8% to 7% recalculation", async () => {
+    let revisionRequest = 0;
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL, options?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/evidence")) return Promise.resolve(jsonResponse(evidenceDetailFixture));
+      if (options?.method === "POST") {
+        revisionRequest += 1;
+        return Promise.resolve(jsonResponse(revisionRequest === 1 ? heroRevisionFixture : sevenPercentRevisionFixture));
+      }
+      return Promise.resolve(jsonResponse(demoDecisionFixture));
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await enterDecisionRoom(user);
+    const lift = screen.getByLabelText("Expected lift (%)");
+    await user.clear(lift);
+    await user.type(lift, "3");
+    await user.click(screen.getByRole("button", { name: "Recalculate Impact" }));
+    await screen.findByText("REV-002 · HUMAN REVISION");
+    await user.clear(lift);
+    await user.type(lift, "7");
+    await user.click(screen.getByRole("button", { name: "Recalculate Impact" }));
+    await screen.findByText("Scenario changed; decision posture remains the same");
+    await user.click(screen.getByRole("button", { name: "Open Revision History" }));
+
+    const drawer = await screen.findByRole("dialog", { name: "Revision History" });
+    expect(within(drawer).getAllByTestId("revision-rev-002")).toHaveLength(1);
+    expect(within(drawer).getByText("8% → 7%")).toBeInTheDocument();
+    expect(within(drawer).getByText("+5,000 USD → +2,500 USD")).toBeInTheDocument();
+    expect(within(drawer).getByText("Still clears")).toBeInTheDocument();
+    expect(within(drawer).queryByText("REV-003")).not.toBeInTheDocument();
+    expect(within(drawer).queryByText("Decision posture changed")).not.toBeInTheDocument();
+  });
+
+  it("keeps Role Lens and Revision History on trusted 3% while a 7% draft is unsaved", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await enterDecisionRoom(user);
+    const lift = screen.getByLabelText("Expected lift (%)");
+    await user.clear(lift);
+    await user.type(lift, "3");
+    await user.click(screen.getByRole("button", { name: "Recalculate Impact" }));
+    await screen.findByText("REV-002 · HUMAN REVISION");
+    await user.clear(lift);
+    await user.type(lift, "7");
+
+    await user.click(screen.getByTestId("role-node-sales_marketing"));
+    let drawer = await screen.findByRole("dialog", { name: "Sales / Marketing" });
+    expect(within(drawer).getByText("An unsaved assumption edit is not reflected in this view.")).toBeInTheDocument();
+    expect(within(drawer).getByText("8% → 3%", { exact: false })).toBeInTheDocument();
+    expect(within(drawer).queryByText("8% → 7%", { exact: false })).not.toBeInTheDocument();
+    expect(within(drawer).getByText("-7,500 USD")).toBeInTheDocument();
+
+    await user.click(within(drawer).getByRole("button", { name: "Close drawer" }));
+    await user.click(screen.getByRole("button", { name: "Open Revision History" }));
+    drawer = await screen.findByRole("dialog", { name: "Revision History" });
+    expect(within(drawer).getByText("8% → 3%")).toBeInTheDocument();
+    expect(within(drawer).queryByText("8% → 7%")).not.toBeInTheDocument();
+    expect(within(drawer).getByText("+5,000 USD → -7,500 USD")).toBeInTheDocument();
   });
 
   it("shows only the safe product error when initial loading fails", async () => {

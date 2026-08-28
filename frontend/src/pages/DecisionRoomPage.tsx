@@ -1,6 +1,9 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { GitBranch } from "lucide-react";
-import { recalculateDecision } from "../api/client";
+import {
+  getDemoDecisionEvidence,
+  recalculateDecision,
+} from "../api/client";
 import {
   canonicalDecimalString,
   fractionToPercentDisplay,
@@ -14,7 +17,9 @@ import {
   isRecalculatedDecision,
   type Assumption,
   type DemoDecision,
+  type EvidenceDetail,
   type ProductDecision,
+  type RoleKey,
 } from "../api/types";
 import { AppSidebar } from "../components/AppSidebar";
 import { StatusBadge } from "../components/StatusBadge";
@@ -25,7 +30,10 @@ import {
 import { CurrentDecisionBar } from "../components/decision/CurrentDecisionBar";
 import { DecisionDiffPanel } from "../components/decision/DecisionDiffPanel";
 import { EvidenceFoundationCard } from "../components/decision/EvidenceFoundationCard";
+import { EvidenceDrawer } from "../components/evidence/EvidenceDrawer";
 import { ImpactMap } from "../components/impact-map/ImpactMap";
+import { RevisionHistoryDrawer } from "../components/revisions/RevisionHistoryDrawer";
+import { RoleLensDrawer } from "../components/roles/RoleLensDrawer";
 
 interface DecisionRoomPageProps {
   data: DemoDecision;
@@ -33,6 +41,11 @@ interface DecisionRoomPageProps {
 
 const SAFE_RECALCULATION_ERROR =
   "Decision impact could not be recalculated safely.";
+
+type ActiveDrawer = "evidence" | "revision" | "role" | null;
+type EvidenceDetailState =
+  | { status: "idle" | "loading" | "error"; data: EvidenceDetail[] }
+  | { status: "loaded"; data: EvidenceDetail[] };
 
 function valueFor(assumptions: Assumption[], key: string): number {
   const assumption = assumptions.find((item) => item.key === key);
@@ -90,7 +103,42 @@ export function DecisionRoomPage({ data }: DecisionRoomPageProps) {
   const [recalculationError, setRecalculationError] = useState<string | null>(
     null,
   );
+  const [activeDrawer, setActiveDrawer] = useState<ActiveDrawer>(null);
+  const [selectedRole, setSelectedRole] = useState<RoleKey | null>(null);
+  const [evidenceDetail, setEvidenceDetail] = useState<EvidenceDetailState>({
+    status: "idle",
+    data: [],
+  });
   const dirty = !draftMatches(draft, trusted.assumptions);
+
+  const closeDrawer = useCallback(() => setActiveDrawer(null), []);
+
+  async function ensureEvidenceDetail() {
+    if (
+      evidenceDetail.status === "loaded" ||
+      evidenceDetail.status === "loading"
+    ) {
+      return;
+    }
+    setEvidenceDetail({ status: "loading", data: [] });
+    try {
+      const detail = await getDemoDecisionEvidence();
+      setEvidenceDetail({ status: "loaded", data: detail });
+    } catch {
+      setEvidenceDetail({ status: "error", data: [] });
+    }
+  }
+
+  function openEvidenceDrawer() {
+    setActiveDrawer("evidence");
+    void ensureEvidenceDetail();
+  }
+
+  function openRoleDrawer(roleKey: RoleKey) {
+    setSelectedRole(roleKey);
+    setActiveDrawer("role");
+    void ensureEvidenceDetail();
+  }
 
   function updateDraft(key: keyof AssumptionDraft, value: string) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -152,14 +200,19 @@ export function DecisionRoomPage({ data }: DecisionRoomPageProps) {
               <StatusBadge tone="neutral">AI Brief not generated</StatusBadge>
             </div>
           </div>
-          <div className="mt-1 flex shrink-0 items-center gap-2 rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs font-semibold tracking-[0.08em] text-slate-300">
+          <button
+            type="button"
+            aria-label="Open Revision History"
+            onClick={() => setActiveDrawer("revision")}
+            className="mt-1 flex shrink-0 items-center gap-2 rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs font-semibold tracking-[0.08em] text-slate-300 transition hover:border-slate-500 hover:text-white focus-visible:ring-2 focus-visible:ring-cyan-300/70"
+          >
             <GitBranch size={15} className="text-slate-500" aria-hidden="true" />
             {trusted.revision.revision_id.toUpperCase()} ·{" "}
             {trusted.revision.label.toUpperCase()}
-          </div>
+          </button>
         </header>
         <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_304px] gap-4">
-          <ImpactMap data={trusted} />
+          <ImpactMap data={trusted} onRoleSelect={openRoleDrawer} />
           <aside className="flex min-h-0 flex-col gap-3 overflow-hidden">
             <AssumptionCard
               draft={draft}
@@ -169,7 +222,10 @@ export function DecisionRoomPage({ data }: DecisionRoomPageProps) {
               onChange={updateDraft}
               onRecalculate={recalculate}
             />
-            <EvidenceFoundationCard evidence={trusted.evidence} />
+            <EvidenceFoundationCard
+              evidence={trusted.evidence}
+              onViewEvidence={openEvidenceDrawer}
+            />
           </aside>
         </div>
         {isRecalculatedDecision(trusted) && trusted.diff.kind !== "no_change" ? (
@@ -178,6 +234,31 @@ export function DecisionRoomPage({ data }: DecisionRoomPageProps) {
           <CurrentDecisionBar scenario={trusted.scenario} />
         )}
       </main>
+      {activeDrawer === "evidence" && (
+        <EvidenceDrawer
+          status={evidenceDetail.status === "idle" ? "loading" : evidenceDetail.status}
+          evidence={evidenceDetail.data}
+          onClose={closeDrawer}
+        />
+      )}
+      {activeDrawer === "role" && selectedRole && (
+        <RoleLensDrawer
+          data={trusted}
+          roleKey={selectedRole}
+          evidenceStatus={evidenceDetail.status === "idle" ? "loading" : evidenceDetail.status}
+          evidence={evidenceDetail.data}
+          dirty={dirty}
+          onClose={closeDrawer}
+        />
+      )}
+      {activeDrawer === "revision" && (
+        <RevisionHistoryDrawer
+          baseline={data}
+          current={trusted}
+          dirty={dirty}
+          onClose={closeDrawer}
+        />
+      )}
     </div>
   );
 }

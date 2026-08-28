@@ -1,5 +1,6 @@
 import type {
   DemoDecision,
+  EvidenceDetail,
   RecalculateDecisionInput,
   RecalculatedDecision,
 } from "./types";
@@ -7,6 +8,7 @@ import type {
 const SAFE_LOAD_ERROR = "RoleLens could not load the demo decision safely.";
 const SAFE_RECALCULATION_ERROR =
   "Decision impact could not be recalculated safely.";
+const SAFE_EVIDENCE_ERROR = "Evidence details could not be loaded safely.";
 
 export class DemoDecisionLoadError extends Error {
   constructor() {
@@ -33,6 +35,27 @@ export class DecisionRecalculationError extends Error {
   constructor() {
     super(SAFE_RECALCULATION_ERROR);
     this.name = "DecisionRecalculationError";
+  }
+}
+
+export class EvidenceDetailLoadError extends Error {
+  constructor() {
+    super(SAFE_EVIDENCE_ERROR);
+    this.name = "EvidenceDetailLoadError";
+  }
+}
+
+export async function getDemoDecisionEvidence(): Promise<EvidenceDetail[]> {
+  try {
+    const response = await fetch("/api/demo/decision/evidence", {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) {
+      throw new EvidenceDetailLoadError();
+    }
+    return (await response.json()) as EvidenceDetail[];
+  } catch {
+    throw new EvidenceDetailLoadError();
   }
 }
 

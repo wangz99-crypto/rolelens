@@ -3,9 +3,10 @@ import type { EvidenceSummary, RevisionEvidenceSummary } from "../../api/types";
 
 interface EvidenceFoundationCardProps {
   evidence: EvidenceSummary | RevisionEvidenceSummary;
+  onViewEvidence: () => void;
 }
 
-export function EvidenceFoundationCard({ evidence }: EvidenceFoundationCardProps) {
+export function EvidenceFoundationCard({ evidence, onViewEvidence }: EvidenceFoundationCardProps) {
   return (
     <section className="rail-card" aria-labelledby="evidence-title">
       <div className="flex items-center justify-between">
@@ -30,10 +31,10 @@ export function EvidenceFoundationCard({ evidence }: EvidenceFoundationCardProps
       </div>
       <button
         type="button"
-        disabled
-        className="mt-4 w-full cursor-not-allowed rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2 text-left text-[11px] text-slate-500"
+        onClick={onViewEvidence}
+        className="mt-4 w-full rounded-lg border border-cyan-400/25 bg-cyan-400/[0.07] px-3 py-2 text-left text-[11px] font-semibold text-cyan-200 transition hover:border-cyan-300/45 hover:bg-cyan-400/10"
       >
-        Evidence details available in a later slice
+        View Evidence
       </button>
     </section>
   );
