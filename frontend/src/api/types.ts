@@ -3,6 +3,20 @@ export type ScenarioStatus =
   | "DOES_NOT_CLEAR_BREAK_EVEN"
   | "NOT_EVALUABLE";
 
+export type RoleKey =
+  | "executive"
+  | "data_analyst"
+  | "data_engineer"
+  | "sales_marketing"
+  | "project_manager";
+
+export type ImpactKind =
+  | "current"
+  | "unchanged"
+  | "recomputed"
+  | "changed"
+  | "blocked";
+
 export interface DecisionSummary {
   decision_id: string;
   title: string;
@@ -12,8 +26,8 @@ export interface DecisionSummary {
 }
 
 export interface RevisionSummary {
-  revision_id: "rev-001";
-  label: "Baseline";
+  revision_id: "rev-001" | "rev-002";
+  label: "Baseline" | "Human revision";
 }
 
 export interface EvidenceSummary {
@@ -25,6 +39,12 @@ export interface EvidenceSummary {
   total_charges_parse_issue_count: number;
   data_health_checked: boolean;
   source_provenance_locked: boolean;
+}
+
+export interface RevisionEvidenceSummary extends EvidenceSummary {
+  observed_evidence_unchanged: boolean;
+  data_health_unchanged: boolean;
+  source_provenance_unchanged: boolean;
 }
 
 export interface Assumption {
@@ -48,16 +68,37 @@ export interface Scenario {
   currency: string;
 }
 
-export interface RoleState {
-  role_key:
-    | "executive"
-    | "data_analyst"
-    | "data_engineer"
-    | "sales_marketing"
-    | "project_manager";
+export interface BaselineRoleState {
+  role_key: RoleKey;
   label: string;
   baseline_state: string;
   state_kind: "current" | "foundation";
+}
+
+export interface RevisionRoleState {
+  role_key: RoleKey;
+  label: string;
+  state: string;
+  impact_kind: ImpactKind;
+}
+
+export interface ChangedAssumption {
+  assumption_id: string;
+  key: string;
+  label: string;
+  before_value: number;
+  after_value: number;
+  unit: string;
+  currency: string | null;
+}
+
+export interface DecisionDiff {
+  kind: "decision_posture_changed" | "scenario_changed" | "no_change";
+  headline: string;
+  changed_assumptions: ChangedAssumption[];
+  scenario_status_changed: boolean;
+  role_posture_changed: boolean;
+  observed_evidence_unchanged: boolean;
 }
 
 export interface DemoDecision {
@@ -66,5 +107,32 @@ export interface DemoDecision {
   evidence: EvidenceSummary;
   assumptions: Assumption[];
   scenario: Scenario;
-  roles: RoleState[];
+  roles: BaselineRoleState[];
+}
+
+export interface RecalculatedDecision {
+  decision: DecisionSummary;
+  revision: RevisionSummary;
+  evidence: RevisionEvidenceSummary;
+  assumptions: Assumption[];
+  before_scenario: Scenario;
+  scenario: Scenario;
+  roles: RevisionRoleState[];
+  diff: DecisionDiff;
+}
+
+export type ProductDecision = DemoDecision | RecalculatedDecision;
+
+export interface RecalculateDecisionInput {
+  pilot_population: number;
+  expected_incremental_lift: string;
+  cost_per_intervention: string;
+  retained_customer_value: string;
+  currency: "USD";
+}
+
+export function isRecalculatedDecision(
+  decision: ProductDecision,
+): decision is RecalculatedDecision {
+  return "diff" in decision;
 }

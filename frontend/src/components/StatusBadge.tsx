@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 interface StatusBadgeProps {
   children: ReactNode;
-  tone: "evidence" | "positive" | "neutral" | "assumption";
+  tone: "evidence" | "positive" | "neutral" | "assumption" | "blocked";
 }
 
 const tones = {
@@ -10,6 +10,7 @@ const tones = {
   positive: "border-emerald-400/25 bg-emerald-400/10 text-emerald-200",
   neutral: "border-slate-700 bg-slate-800/70 text-slate-300",
   assumption: "border-amber-400/25 bg-amber-400/10 text-amber-200",
+  blocked: "border-red-400/25 bg-red-400/10 text-red-200",
 };
 
 export function StatusBadge({ children, tone }: StatusBadgeProps) {

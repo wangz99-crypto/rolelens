@@ -1,8 +1,8 @@
 import { DatabaseZap, LockKeyhole, ShieldCheck } from "lucide-react";
-import type { EvidenceSummary } from "../../api/types";
+import type { EvidenceSummary, RevisionEvidenceSummary } from "../../api/types";
 
 interface EvidenceFoundationCardProps {
-  evidence: EvidenceSummary;
+  evidence: EvidenceSummary | RevisionEvidenceSummary;
 }
 
 export function EvidenceFoundationCard({ evidence }: EvidenceFoundationCardProps) {
@@ -22,7 +22,10 @@ export function EvidenceFoundationCard({ evidence }: EvidenceFoundationCardProps
         <span className="ml-2 text-sm font-normal text-slate-400">governed findings</span>
       </p>
       <div className="mt-4 grid grid-cols-2 gap-2">
-        <EvidenceCheck icon={<DatabaseZap size={14} />} label="Data Health checked" />
+        {"observed_evidence_unchanged" in evidence && (
+          <EvidenceCheck icon={<ShieldCheck size={14} />} label="Observed Evidence unchanged" />
+        )}
+        <EvidenceCheck icon={<DatabaseZap size={14} />} label={"data_health_unchanged" in evidence ? "Data Health unchanged" : "Data Health checked"} />
         <EvidenceCheck icon={<LockKeyhole size={14} />} label="Source locked" />
       </div>
       <button

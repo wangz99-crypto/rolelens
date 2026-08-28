@@ -58,3 +58,18 @@ button:focus-visible {
 .react-flow__node {
   cursor: default !important;
 }
+
+@keyframes decision-diff-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.decision-diff-enter {
+  animation: decision-diff-enter 260ms ease-out both;
+}

@@ -1,10 +1,11 @@
-"""Focused safety and contract tests for the Slice 1 product API."""
+"""Focused safety and contract tests for the Slice 1 and Slice 2 product API."""
 
 from __future__ import annotations
 
 import ast
 import importlib
 import sys
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,21 @@ _EXPECTED_EVIDENCE_TYPES = {
     "business_churn_medians",
     "business_parseability",
 }
+_BASELINE_REQUEST = {
+    "pilot_population": 500,
+    "expected_incremental_lift": 0.08,
+    "cost_per_intervention": 30,
+    "retained_customer_value": 500,
+    "currency": "USD",
+}
+
+
+def _post_revision(**updates: Any) -> Any:
+    """POST one complete scenario request with selected value updates."""
+    return TestClient(product_api.app).post(
+        "/api/demo/decision/recalculate",
+        json={**_BASELINE_REQUEST, **updates},
+    )
 
 
 @pytest.fixture(scope="module")
@@ -227,8 +243,6 @@ def test_api_has_no_forbidden_integration_imports() -> None:
         "human_review",
         "memo_generator",
         "semantic_risk_reviewer",
-        "decision_diff_engine",
-        "decision_diff_rolelens",
         "granite",
     }
     assert not any(
@@ -264,4 +278,233 @@ def test_safe_error_response_contains_no_internal_details(
     assert response.json() == {"detail": product_api._PRODUCT_ERROR}
     assert secret not in response.text
     assert "traceback" not in response.text.lower()
+    assert "pydantic" not in response.text.lower()
+
+
+def test_hero_post_calls_dd3_once_and_returns_exact_trusted_diff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The 8% to 3% Hero runs once through DD-3 and returns bounded truth."""
+    real_builder = product_api.build_rolelens_decision_revision
+    calls = 0
+
+    def recording_builder(*args: Any, **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        return real_builder(*args, **kwargs)
+
+    monkeypatch.setattr(
+        product_api,
+        "build_rolelens_decision_revision",
+        recording_builder,
+    )
+    response = _post_revision(expected_incremental_lift=0.03)
+    assert response.status_code == 200
+    assert calls == 1
+    result = response.json()
+    assert result["revision"] == {
+        "revision_id": "rev-002",
+        "label": "Human revision",
+    }
+    assert result["before_scenario"] == {
+        "scenario_id": "scn-001",
+        "status": "CLEARS_BREAK_EVEN",
+        "expected_incremental_retained": 40.0,
+        "expected_scenario_value": 20000.0,
+        "intervention_cost": 15000.0,
+        "net_scenario_value": 5000.0,
+        "break_even_lift": 0.06,
+        "currency": "USD",
+    }
+    assert result["scenario"] == {
+        "scenario_id": "scn-001",
+        "status": "DOES_NOT_CLEAR_BREAK_EVEN",
+        "expected_incremental_retained": 15.0,
+        "expected_scenario_value": 7500.0,
+        "intervention_cost": 15000.0,
+        "net_scenario_value": -7500.0,
+        "break_even_lift": 0.06,
+        "currency": "USD",
+    }
+    assert result["diff"] == {
+        "kind": "decision_posture_changed",
+        "headline": "Decision posture changed",
+        "changed_assumptions": [
+            {
+                "assumption_id": "asm-002",
+                "key": "expected_incremental_lift",
+                "label": "Expected lift",
+                "before_value": 0.08,
+                "after_value": 0.03,
+                "unit": "fraction",
+                "currency": None,
+            }
+        ],
+        "scenario_status_changed": True,
+        "role_posture_changed": True,
+        "observed_evidence_unchanged": True,
+    }
+    assert "ai_brief" not in result
+
+
+def test_hero_role_states_and_foundation_invariants_are_exact() -> None:
+    """Hero roles and unchanged product foundations come only from DD-3."""
+    response = _post_revision(expected_incremental_lift=0.03)
+    assert response.status_code == 200
+    result = response.json()
+    assert result["roles"] == [
+        {"role_key": "executive", "label": "Executive", "state": "Validate assumptions first", "impact_kind": "changed"},
+        {"role_key": "data_analyst", "label": "Data Analyst", "state": "Evidence basis remains valid", "impact_kind": "unchanged"},
+        {"role_key": "data_engineer", "label": "Data Engineer", "state": "Data foundation remains valid", "impact_kind": "unchanged"},
+        {"role_key": "sales_marketing", "label": "Sales / Marketing", "state": "Blocked by scenario", "impact_kind": "blocked"},
+        {"role_key": "project_manager", "label": "Project Manager", "state": "Reopen scenario validation", "impact_kind": "changed"},
+    ]
+    evidence = result["evidence"]
+    assert evidence["governed_evidence_count"] == 7
+    assert evidence["observed_evidence_unchanged"] is True
+    assert evidence["data_health_unchanged"] is True
+    assert evidence["source_provenance_unchanged"] is True
+
+
+def test_seven_percent_recomputes_without_blocking_roles() -> None:
+    """A changed but clearing scenario keeps postures and marks recomputation."""
+    response = _post_revision(expected_incremental_lift=0.07)
+    assert response.status_code == 200
+    result = response.json()
+    assert result["scenario"]["net_scenario_value"] == 2500.0
+    assert result["scenario"]["status"] == "CLEARS_BREAK_EVEN"
+    assert result["diff"]["kind"] == "scenario_changed"
+    assert result["diff"]["headline"] == (
+        "Scenario changed; decision posture remains the same"
+    )
+    roles = {item["role_key"]: item for item in result["roles"]}
+    assert roles["executive"]["impact_kind"] == "recomputed"
+    assert roles["sales_marketing"]["impact_kind"] == "recomputed"
+    assert roles["project_manager"]["impact_kind"] == "recomputed"
+    assert roles["data_analyst"]["impact_kind"] == "unchanged"
+    assert roles["data_engineer"]["impact_kind"] == "unchanged"
+    assert roles["sales_marketing"]["state"] == "Eligible for pilot review"
+
+
+def test_decimal_string_lift_reaches_dd3_as_exact_decimal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The React decimal string is preserved exactly at the DD-3 boundary."""
+    real_builder = product_api.build_rolelens_decision_revision
+    received: dict[str, Decimal] = {}
+
+    def recording_builder(*args: Any, **kwargs: Any) -> Any:
+        after_assumptions = kwargs["after_assumptions"]
+        received["lift"] = after_assumptions[1].value
+        return real_builder(*args, **kwargs)
+
+    monkeypatch.setattr(
+        product_api,
+        "build_rolelens_decision_revision",
+        recording_builder,
+    )
+    response = _post_revision(expected_incremental_lift="0.333")
+    assert response.status_code == 200
+    assert received["lift"] == Decimal("0.333")
+
+
+def test_logical_baseline_request_returns_no_change_control() -> None:
+    """Equal logical values produce no changes and no user-facing revision."""
+    response = _post_revision()
+    assert response.status_code == 200
+    result = response.json()
+    assert result["revision"] == {"revision_id": "rev-001", "label": "Baseline"}
+    assert result["diff"]["kind"] == "no_change"
+    assert result["diff"]["headline"] == "No scenario assumption changed"
+    assert result["diff"]["changed_assumptions"] == []
+    assert all(role["impact_kind"] == "unchanged" for role in result["roles"])
+
+
+def test_non_lift_assumption_propagates_generically() -> None:
+    """Changing intervention cost uses the same trusted propagation path."""
+    response = _post_revision(cost_per_intervention=35)
+    assert response.status_code == 200
+    result = response.json()
+    assert result["scenario"]["net_scenario_value"] == 2500.0
+    assert result["scenario"]["status"] == "CLEARS_BREAK_EVEN"
+    assert result["diff"]["kind"] == "scenario_changed"
+    assert result["diff"]["changed_assumptions"] == [
+        {
+            "assumption_id": "asm-003",
+            "key": "cost_per_intervention",
+            "label": "Cost / intervention",
+            "before_value": 30.0,
+            "after_value": 35.0,
+            "unit": "currency_per_customer",
+            "currency": "USD",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "update",
+    [
+        {"pilot_population": 0},
+        {"cost_per_intervention": -1},
+        {"retained_customer_value": 0},
+        {"expected_incremental_lift": 1.01},
+        {"currency": "EUR"},
+        {"unexpected": "raw internal value"},
+    ],
+)
+def test_invalid_recalculation_inputs_fail_with_bounded_error(
+    update: dict[str, Any],
+) -> None:
+    """Shape and authoritative assumption failures never expose diagnostics."""
+    response = _post_revision(**update)
+    assert response.status_code == 422
+    assert response.json() == {"detail": product_api._INVALID_ASSUMPTIONS_ERROR}
+    assert "pydantic" not in response.text.lower()
+    assert "traceback" not in response.text.lower()
+    assert "raw internal value" not in response.text.lower()
+
+
+def test_post_uses_only_dd3_entry_and_leaks_no_internal_snapshots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """POST does not call the imported GET calculator or expose DD internals."""
+    def forbidden_calculator(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("POST called DD-1 directly")
+
+    monkeypatch.setattr(
+        product_api,
+        "calculate_break_even_scenario",
+        forbidden_calculator,
+    )
+    response = _post_revision(expected_incremental_lift=0.03)
+    assert response.status_code == 200
+    serialized = response.text.lower()
+    for forbidden in (
+        "snapshot_json",
+        "identity_digest",
+        "evidence_id",
+        "trigger_refs",
+        "obj-break-even",
+        "traceback",
+        "pydantic",
+    ):
+        assert forbidden not in serialized
+
+
+def test_unexpected_recalculation_failure_is_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unexpected DD-3 failures retain no payload or internal exception text."""
+    def failing_builder(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("secret snapshot_json https://errors.pydantic.dev")
+
+    monkeypatch.setattr(
+        product_api,
+        "build_rolelens_decision_revision",
+        failing_builder,
+    )
+    response = _post_revision(expected_incremental_lift=0.03)
+    assert response.status_code == 503
+    assert response.json() == {"detail": product_api._RECALCULATION_ERROR}
+    assert "secret" not in response.text.lower()
     assert "pydantic" not in response.text.lower()
