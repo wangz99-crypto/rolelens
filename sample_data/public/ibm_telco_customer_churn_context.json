@@ -1,0 +1,7 @@
+{
+  "dataset_context": "This is IBM's fictional telecommunications customer churn sample. Each row represents a customer account and includes service, contract, billing, tenure, and churn information.",
+  "business_question": "Is the current evidence sufficient to approve a limited customer-retention pilot, and what must each function validate before any outreach begins?",
+  "decision_goal": "Identify descriptive churn patterns, data limitations, role-specific responsibilities, and the governed sequence required before a limited retention pilot can be reviewed.",
+  "strategy_profile": "The company wants to reduce avoidable churn but will not authorize broad or automated customer outreach without validated targeting evidence and human review.",
+  "user_assumption": "Month-to-month contracts, shorter tenure, and higher monthly charges may be associated with greater churn risk. These are hypotheses to test descriptively, not established causal claims."
+}
