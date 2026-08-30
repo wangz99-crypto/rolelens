@@ -125,6 +125,7 @@ export interface DemoDecision {
   assumptions: Assumption[];
   scenario: Scenario;
   roles: BaselineRoleState[];
+  accepted_state_fingerprint: string;
 }
 
 export interface RecalculatedDecision {
@@ -136,6 +137,7 @@ export interface RecalculatedDecision {
   scenario: Scenario;
   roles: RevisionRoleState[];
   diff: DecisionDiff;
+  accepted_state_fingerprint: string;
 }
 
 export type ProductDecision = DemoDecision | RecalculatedDecision;
@@ -146,6 +148,25 @@ export interface RecalculateDecisionInput {
   cost_per_intervention: string;
   retained_customer_value: string;
   currency: "USD";
+}
+
+export type RoleBriefLifecycle = "NOT_GENERATED" | "CURRENT" | "STALE";
+
+export interface RoleImpactBrief {
+  role_key: RoleKey;
+  why_it_matters: string;
+  what_still_holds: string;
+  what_to_verify_next: string;
+  evidence_refs: string[];
+  assumption_refs: string[];
+  next_handoff: string;
+}
+
+export interface RoleImpactBriefSetResponse {
+  accepted_state_fingerprint: string;
+  provider: "IBM watsonx.ai";
+  model_id: string;
+  briefs: RoleImpactBrief[];
 }
 
 export function isRecalculatedDecision(

@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DecisionRecalculationError,
   DemoDecisionLoadError,
+  generateRoleBriefs,
   getDemoDecision,
   recalculateDecision,
+  RoleBriefGenerationError,
 } from "./client";
 
 describe("product API client", () => {
@@ -37,5 +39,53 @@ describe("product API client", () => {
       "/api/demo/decision/recalculate",
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  it("posts exact trusted decimal strings to the bounded role-brief route", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          accepted_state_fingerprint: "a".repeat(64),
+          provider: "IBM watsonx.ai",
+          model_id: "ibm/granite-4-h-small",
+          briefs: [],
+        }),
+      }),
+    );
+    await generateRoleBriefs({
+      pilot_population: 500,
+      expected_incremental_lift: "0.03",
+      cost_per_intervention: "30",
+      retained_customer_value: "500",
+      currency: "USD",
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/demo/decision/role-brief",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          pilot_population: 500,
+          expected_incremental_lift: "0.03",
+          cost_per_intervention: "30",
+          retained_customer_value: "500",
+          currency: "USD",
+        }),
+      }),
+    );
+  });
+
+  it("sanitizes role-brief backend diagnostics", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 503 }));
+    await expect(
+      generateRoleBriefs({
+        pilot_population: 500,
+        expected_incremental_lift: "0.03",
+        cost_per_intervention: "30",
+        retained_customer_value: "500",
+        currency: "USD",
+      }),
+    ).rejects.toEqual(new RoleBriefGenerationError());
   });
 });

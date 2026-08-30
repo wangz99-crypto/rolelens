@@ -2,10 +2,13 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import { roleBriefRequestFromTrusted } from "./pages/DecisionRoomPage";
 import {
   demoDecisionFixture,
   evidenceDetailFixture,
+  heroBriefSetFixture,
   heroRevisionFixture,
+  sevenPercentBriefSetFixture,
   sevenPercentRevisionFixture,
 } from "./test/fixture";
 
@@ -25,6 +28,12 @@ function postCalls() {
 function evidenceCalls() {
   return vi.mocked(fetch).mock.calls.filter(([input]) =>
     String(input).endsWith("/api/demo/decision/evidence"),
+  );
+}
+
+function roleBriefCalls() {
+  return vi.mocked(fetch).mock.calls.filter(([input]) =>
+    String(input).endsWith("/api/demo/decision/role-brief"),
   );
 }
 
@@ -436,5 +445,230 @@ describe("RoleLens Slice 3 flow", () => {
     await user.click(screen.getByRole("button", { name: /open demo workspace/i }));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("RoleLens could not load the demo decision safely."));
     expect(screen.queryByText(/secret traceback/i)).not.toBeInTheDocument();
+  });
+
+  it("starts NOT GENERATED and never calls Granite automatically", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await enterDecisionRoom(user);
+    expect(screen.getByText("AI Brief not generated")).toBeInTheDocument();
+    await user.click(screen.getByTestId("role-node-sales_marketing"));
+    const drawer = await screen.findByRole("dialog", { name: "Sales / Marketing" });
+    expect(within(drawer).getByText("NOT GENERATED")).toBeInTheDocument();
+    expect(within(drawer).getByRole("button", { name: "Generate Role Brief" })).toBeEnabled();
+    expect(roleBriefCalls()).toHaveLength(0);
+  });
+
+  it("uses one Granite POST to make all five returned role briefs CURRENT", async () => {
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/evidence")) return Promise.resolve(jsonResponse(evidenceDetailFixture));
+      if (url.endsWith("/role-brief")) return Promise.resolve(jsonResponse(heroBriefSetFixture));
+      if (url.endsWith("/recalculate")) return Promise.resolve(jsonResponse(heroRevisionFixture));
+      return Promise.resolve(jsonResponse(demoDecisionFixture));
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await enterDecisionRoom(user);
+    const lift = screen.getByLabelText("Expected lift (%)");
+    await user.clear(lift);
+    await user.type(lift, "3");
+    await user.click(screen.getByRole("button", { name: "Recalculate Impact" }));
+    await screen.findByText("AI Brief not generated");
+    await user.click(screen.getByTestId("role-node-sales_marketing"));
+    let drawer = await screen.findByRole("dialog", { name: "Sales / Marketing" });
+    expect(within(drawer).getAllByText("Blocked by scenario")).toHaveLength(2);
+    expect(within(drawer).getByText("BLOCKED")).toBeInTheDocument();
+    await user.click(within(drawer).getByRole("button", { name: "Generate Role Brief" }));
+    expect(await within(drawer).findByText("CURRENT")).toBeInTheDocument();
+    expect(within(drawer).queryByRole("button", { name: "Generate Role Brief" })).not.toBeInTheDocument();
+    expect(within(drawer).queryByRole("button", { name: "Refresh Role Brief" })).not.toBeInTheDocument();
+    expect(within(drawer).getByText("Sales 3% interpretation explains the trusted posture.")).toBeInTheDocument();
+    for (const heading of ["Why it matters", "What still holds", "What to verify next", "Next handoff", "Grounding"]) {
+      expect(within(drawer).getByText(heading)).toBeInTheDocument();
+    }
+    expect(roleBriefCalls()).toHaveLength(1);
+    await user.click(within(drawer).getByRole("button", { name: "Close drawer" }));
+    await user.click(screen.getByTestId("role-node-data_analyst"));
+    drawer = await screen.findByRole("dialog", { name: "Data Analyst" });
+    expect(within(drawer).getByText("CURRENT")).toBeInTheDocument();
+    expect(within(drawer).getByText("Data Analyst 3% interpretation explains the trusted posture.")).toBeInTheDocument();
+    expect(roleBriefCalls()).toHaveLength(1);
+  });
+
+  it("keeps a trusted 3% brief CURRENT during an unsaved 7% draft", async () => {
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/evidence")) return Promise.resolve(jsonResponse(evidenceDetailFixture));
+      if (url.endsWith("/role-brief")) return Promise.resolve(jsonResponse(heroBriefSetFixture));
+      if (url.endsWith("/recalculate")) return Promise.resolve(jsonResponse(heroRevisionFixture));
+      return Promise.resolve(jsonResponse(demoDecisionFixture));
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await enterDecisionRoom(user);
+    const lift = screen.getByLabelText("Expected lift (%)");
+    await user.clear(lift);
+    await user.type(lift, "3");
+    await user.click(screen.getByRole("button", { name: "Recalculate Impact" }));
+    await user.click(screen.getByTestId("role-node-sales_marketing"));
+    let drawer = await screen.findByRole("dialog", { name: "Sales / Marketing" });
+    await user.click(within(drawer).getByRole("button", { name: "Generate Role Brief" }));
+    await within(drawer).findByText("CURRENT");
+    await user.click(within(drawer).getByRole("button", { name: "Close drawer" }));
+    await user.clear(lift);
+    await user.type(lift, "7");
+    expect(screen.getByText("AI Brief current")).toBeInTheDocument();
+    await user.click(screen.getByTestId("role-node-sales_marketing"));
+    drawer = await screen.findByRole("dialog", { name: "Sales / Marketing" });
+    expect(within(drawer).getByText("CURRENT")).toBeInTheDocument();
+    expect(within(drawer).getByText("-7,500 USD")).toBeInTheDocument();
+    expect(within(drawer).getByText("Recalculate or revert the unsaved assumption edit before generating a new brief.")).toBeInTheDocument();
+    expect(within(drawer).queryByRole("button", { name: "Generate Role Brief" })).not.toBeInTheDocument();
+    expect(roleBriefCalls()).toHaveLength(1);
+  });
+
+  it("derives STALE after accepting 7% and refreshes all five briefs together", async () => {
+    let revisionCount = 0;
+    let briefCount = 0;
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/evidence")) return Promise.resolve(jsonResponse(evidenceDetailFixture));
+      if (url.endsWith("/role-brief")) {
+        briefCount += 1;
+        return Promise.resolve(jsonResponse(briefCount === 1 ? heroBriefSetFixture : sevenPercentBriefSetFixture));
+      }
+      if (url.endsWith("/recalculate")) {
+        revisionCount += 1;
+        return Promise.resolve(jsonResponse(revisionCount === 1 ? heroRevisionFixture : sevenPercentRevisionFixture));
+      }
+      return Promise.resolve(jsonResponse(demoDecisionFixture));
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await enterDecisionRoom(user);
+    const lift = screen.getByLabelText("Expected lift (%)");
+    await user.clear(lift);
+    await user.type(lift, "3");
+    await user.click(screen.getByRole("button", { name: "Recalculate Impact" }));
+    await user.click(screen.getByTestId("role-node-sales_marketing"));
+    let drawer = await screen.findByRole("dialog", { name: "Sales / Marketing" });
+    await user.click(within(drawer).getByRole("button", { name: "Generate Role Brief" }));
+    await within(drawer).findByText("CURRENT");
+    await user.click(within(drawer).getByRole("button", { name: "Close drawer" }));
+    await user.clear(lift);
+    await user.type(lift, "7");
+    await user.click(screen.getByRole("button", { name: "Recalculate Impact" }));
+    expect(await screen.findByText("AI Brief stale")).toBeInTheDocument();
+    await user.click(screen.getByTestId("role-node-sales_marketing"));
+    drawer = await screen.findByRole("dialog", { name: "Sales / Marketing" });
+    expect(within(drawer).getByText("STALE")).toBeInTheDocument();
+    expect(within(drawer).getByText("This brief was generated for the previous accepted decision state.")).toBeInTheDocument();
+    expect(within(drawer).getByText("Sales 3% interpretation explains the trusted posture.")).toBeInTheDocument();
+    expect(within(drawer).getByText("+2,500 USD")).toBeInTheDocument();
+    expect(within(drawer).getAllByText("Eligible for pilot review")).toHaveLength(2);
+    await user.click(within(drawer).getByRole("button", { name: "Refresh Role Brief" }));
+    expect(await within(drawer).findByText("CURRENT")).toBeInTheDocument();
+    expect(within(drawer).getByText("Sales 7% interpretation explains the trusted posture.")).toBeInTheDocument();
+    expect(roleBriefCalls()).toHaveLength(2);
+  });
+
+  it("preserves the stale brief when refresh fails", async () => {
+    let revisionCount = 0;
+    let briefCount = 0;
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/evidence")) return Promise.resolve(jsonResponse(evidenceDetailFixture));
+      if (url.endsWith("/role-brief")) {
+        briefCount += 1;
+        return Promise.resolve(briefCount === 1 ? jsonResponse(heroBriefSetFixture) : jsonResponse({}, false));
+      }
+      if (url.endsWith("/recalculate")) {
+        revisionCount += 1;
+        return Promise.resolve(jsonResponse(revisionCount === 1 ? heroRevisionFixture : sevenPercentRevisionFixture));
+      }
+      return Promise.resolve(jsonResponse(demoDecisionFixture));
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await enterDecisionRoom(user);
+    const lift = screen.getByLabelText("Expected lift (%)");
+    await user.clear(lift);
+    await user.type(lift, "3");
+    await user.click(screen.getByRole("button", { name: "Recalculate Impact" }));
+    await user.click(screen.getByTestId("role-node-sales_marketing"));
+    let drawer = await screen.findByRole("dialog", { name: "Sales / Marketing" });
+    await user.click(within(drawer).getByRole("button", { name: "Generate Role Brief" }));
+    await within(drawer).findByText("CURRENT");
+    await user.click(within(drawer).getByRole("button", { name: "Close drawer" }));
+    await user.clear(lift);
+    await user.type(lift, "7");
+    await user.click(screen.getByRole("button", { name: "Recalculate Impact" }));
+    await user.click(screen.getByTestId("role-node-sales_marketing"));
+    drawer = await screen.findByRole("dialog", { name: "Sales / Marketing" });
+    await user.click(within(drawer).getByRole("button", { name: "Refresh Role Brief" }));
+    expect(await within(drawer).findByRole("alert")).toHaveTextContent("IBM Granite Role Brief could not be generated safely.");
+    expect(within(drawer).getByText("STALE")).toBeInTheDocument();
+    expect(within(drawer).getByText("Sales 3% interpretation explains the trusted posture.")).toBeInTheDocument();
+  });
+
+  it("keeps NOT GENERATED and deterministic state when initial generation fails", async () => {
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/evidence")) return Promise.resolve(jsonResponse(evidenceDetailFixture));
+      if (url.endsWith("/role-brief")) return Promise.resolve(jsonResponse({}, false));
+      return Promise.resolve(jsonResponse(demoDecisionFixture));
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await enterDecisionRoom(user);
+    await user.click(screen.getByTestId("role-node-sales_marketing"));
+    const drawer = await screen.findByRole("dialog", { name: "Sales / Marketing" });
+    await user.click(within(drawer).getByRole("button", { name: "Generate Role Brief" }));
+    expect(await within(drawer).findByRole("alert")).toHaveTextContent("IBM Granite Role Brief could not be generated safely.");
+    expect(within(drawer).getByText("NOT GENERATED")).toBeInTheDocument();
+    expect(within(drawer).queryByText("Why it matters")).not.toBeInTheDocument();
+    expect(within(drawer).getAllByText("Eligible for pilot review")).toHaveLength(2);
+  });
+
+  it("constructs role-brief requests only from accepted trusted assumptions", () => {
+    const request = roleBriefRequestFromTrusted(heroRevisionFixture.assumptions);
+    expect(request.expected_incremental_lift).toBe("0.03");
+    expect(JSON.stringify(request)).not.toContain("0.07");
+  });
+
+  it("renders no prohibited AI overclaim in the primary successful flow", async () => {
+    vi.mocked(fetch).mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/evidence")) return Promise.resolve(jsonResponse(evidenceDetailFixture));
+      if (url.endsWith("/role-brief")) return Promise.resolve(jsonResponse(heroBriefSetFixture));
+      if (url.endsWith("/recalculate")) return Promise.resolve(jsonResponse(heroRevisionFixture));
+      return Promise.resolve(jsonResponse(demoDecisionFixture));
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await enterDecisionRoom(user);
+    const lift = screen.getByLabelText("Expected lift (%)");
+    await user.clear(lift);
+    await user.type(lift, "3");
+    await user.click(screen.getByRole("button", { name: "Recalculate Impact" }));
+    await user.click(screen.getByTestId("role-node-sales_marketing"));
+    const drawer = await screen.findByRole("dialog", { name: "Sales / Marketing" });
+    await user.click(within(drawer).getByRole("button", { name: "Generate Role Brief" }));
+    await within(drawer).findByText("CURRENT");
+    const rendered = document.body.textContent?.toLowerCase() ?? "";
+    for (const forbidden of [
+      "ai approved",
+      "granite approved",
+      "approval granted",
+      "ai decided",
+      "customer will churn",
+      "high-risk customer",
+      "target customers",
+      "contact customers",
+      "predicted roi",
+    ]) {
+      expect(rendered).not.toContain(forbidden);
+    }
   });
 });

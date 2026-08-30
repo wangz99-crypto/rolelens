@@ -2,7 +2,12 @@ import type {
   DemoDecision,
   EvidenceDetail,
   RecalculatedDecision,
+  RoleImpactBriefSetResponse,
 } from "../api/types";
+
+export const baselineFingerprint = "a".repeat(64);
+export const heroFingerprint = "b".repeat(64);
+export const sevenPercentFingerprint = "c".repeat(64);
 
 export const evidenceDetailFixture: EvidenceDetail[] = [
   {
@@ -137,6 +142,7 @@ export const demoDecisionFixture: DemoDecision = {
     { role_key: "sales_marketing", label: "Sales / Marketing", baseline_state: "Eligible for pilot review", state_kind: "current" },
     { role_key: "project_manager", label: "Project Manager", baseline_state: "Prepare limited pilot review", state_kind: "current" },
   ],
+  accepted_state_fingerprint: baselineFingerprint,
 };
 
 const unchangedEvidence = {
@@ -188,6 +194,7 @@ export const heroRevisionFixture: RecalculatedDecision = {
     role_posture_changed: true,
     observed_evidence_unchanged: true,
   },
+  accepted_state_fingerprint: heroFingerprint,
 };
 
 export const sevenPercentRevisionFixture: RecalculatedDecision = {
@@ -228,4 +235,45 @@ export const sevenPercentRevisionFixture: RecalculatedDecision = {
     role_posture_changed: false,
     observed_evidence_unchanged: true,
   },
+  accepted_state_fingerprint: sevenPercentFingerprint,
 };
+
+function briefSet(
+  fingerprint: string,
+  generation: "3%" | "7%",
+): RoleImpactBriefSetResponse {
+  const roleEvidence = {
+    executive: evidenceDetailFixture[0].evidence_id,
+    data_analyst: evidenceDetailFixture[0].evidence_id,
+    data_engineer: evidenceDetailFixture[6].evidence_id,
+    sales_marketing: evidenceDetailFixture[0].evidence_id,
+    project_manager: evidenceDetailFixture[0].evidence_id,
+  } as const;
+  const roleNames = {
+    executive: "Executive",
+    data_analyst: "Data Analyst",
+    data_engineer: "Data Engineer",
+    sales_marketing: "Sales",
+    project_manager: "Project Manager",
+  } as const;
+  return {
+    accepted_state_fingerprint: fingerprint,
+    provider: "IBM watsonx.ai",
+    model_id: "ibm/granite-4-h-small",
+    briefs: Object.keys(roleNames).map((roleKey) => {
+      const key = roleKey as keyof typeof roleNames;
+      return {
+        role_key: key,
+        why_it_matters: `${roleNames[key]} ${generation} interpretation explains the trusted posture.`,
+        what_still_holds: "Observed Evidence and the data foundation remain unchanged.",
+        what_to_verify_next: "Recheck the accepted expected-lift assumption.",
+        evidence_refs: [roleEvidence[key]],
+        assumption_refs: ["asm-002"],
+        next_handoff: "Data Analyst should coordinate the next review with Project Manager.",
+      };
+    }),
+  };
+}
+
+export const heroBriefSetFixture = briefSet(heroFingerprint, "3%");
+export const sevenPercentBriefSetFixture = briefSet(sevenPercentFingerprint, "7%");

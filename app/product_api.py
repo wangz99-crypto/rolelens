@@ -7,6 +7,7 @@ IBM Telco context through the existing Python core.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from decimal import Decimal
@@ -16,7 +17,7 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.business_profile import BusinessDatasetProfile
 from app.decision_diff import ScenarioAssumption, ScenarioResult, calculate_break_even_scenario
@@ -29,6 +30,21 @@ from app.decision_diff_rolelens import (
     build_rolelens_decision_revision,
 )
 from app.demo_pipeline import PreparedDemoInputs, prepare_demo_inputs
+from app.granite_role_brief_provider import GraniteRoleBriefProvider
+from app.role_brief_plan import build_role_brief_plan_set
+from app.role_impact_brief import (
+    AcceptedAssumptionContext,
+    AcceptedRevisionContext,
+    ChangedAssumptionContext,
+    DecisionIdentityContext,
+    FoundationStateContext,
+    GovernedEvidenceContext,
+    RoleBriefGenerationContext,
+    RoleImpactBrief,
+    TrustedRoleStateContext,
+    TrustedScenarioContext,
+    build_role_brief_targets,
+)
 from app.schemas import EvidenceObject
 
 
@@ -40,6 +56,7 @@ _PRODUCT_ERROR = "RoleLens could not load the demo decision safely."
 _EVIDENCE_ERROR = "Evidence details could not be loaded safely."
 _INVALID_ASSUMPTIONS_ERROR = "Decision assumptions are invalid."
 _RECALCULATION_ERROR = "RoleLens could not recalculate the demo decision safely."
+_ROLE_BRIEF_ERROR = "IBM Granite Role Brief could not be generated safely."
 _DISCLOSURE = "This is a fictional IBM sample dataset, not real customer production data."
 
 _BUSINESS_EVIDENCE_TYPES = (
@@ -218,6 +235,7 @@ class DemoDecisionResponse(_ProductContract):
     assumptions: tuple[AssumptionResponse, ...]
     scenario: ScenarioResponse
     roles: tuple[RoleResponse, ...]
+    accepted_state_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class RecalculateDecisionRequest(_ProductContract):
@@ -241,6 +259,20 @@ class RecalculatedDecisionResponse(_ProductContract):
     scenario: ScenarioResponse
     roles: tuple[RevisionRoleResponse, ...]
     diff: DecisionDiffResponse
+    accepted_state_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class RoleBriefRequest(RecalculateDecisionRequest):
+    """Only accepted scenario assumptions allowed for role-brief rebuilding."""
+
+
+class RoleBriefResponse(_ProductContract):
+    """Bounded validated product response for all five Granite role briefs."""
+
+    accepted_state_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    provider: Literal["IBM watsonx.ai"]
+    model_id: str
+    briefs: tuple[RoleImpactBrief, ...]
 
 
 class _InvalidDecisionAssumptions(ValueError):
@@ -256,6 +288,20 @@ class _PreparedProductContext:
     profile: BusinessDatasetProfile
     business_evidence: tuple[EvidenceObject, ...]
     month_to_month_churn_rate_pct: float
+
+
+@dataclass(frozen=True)
+class _TrustedRevisionBuild:
+    """Internal trusted DD-3 reconstruction shared by recalculate and Granite."""
+
+    context: _PreparedProductContext
+    before_assumptions: tuple[ScenarioAssumption, ...]
+    after_assumptions: tuple[ScenarioAssumption, ...]
+    revision: RoleLensDecisionRevision
+    evidence: RevisionEvidenceSummaryResponse
+    roles: tuple[RevisionRoleResponse, ...]
+    diff: DecisionDiffResponse
+    has_logical_change: bool
 
 
 _ASSUMPTION_LABELS = {
@@ -324,6 +370,117 @@ def _required_decimal(value: Decimal | None) -> float:
     if value is None:
         raise ValueError("The scenario result is incomplete.")
     return float(value)
+
+
+def _canonical_decimal(value: Decimal) -> str:
+    """Return one stable plain-decimal representation for logical identity."""
+    if not value.is_finite():
+        raise ValueError("A trusted decimal is not finite.")
+    if value == 0:
+        return "0"
+    return format(value.normalize(), "f")
+
+
+def _required_decimal_text(value: Decimal | None) -> str:
+    """Return canonical text for one required trusted scenario Decimal."""
+    if value is None:
+        raise ValueError("The scenario result is incomplete.")
+    return _canonical_decimal(value)
+
+
+def _role_state_payload(
+    roles: tuple[RoleResponse | RevisionRoleResponse, ...],
+) -> list[dict[str, str]]:
+    """Project role state and canonical impact kind in stable product order."""
+    payload: list[dict[str, str]] = []
+    for role in roles:
+        if isinstance(role, RoleResponse):
+            state = role.baseline_state
+            impact_kind = "current"
+        else:
+            state = role.state
+            impact_kind = role.impact_kind
+        payload.append(
+            {
+                "role_key": role.role_key,
+                "state": state,
+                "impact_kind": impact_kind,
+            }
+        )
+    return payload
+
+
+def _accepted_state_fingerprint(
+    *,
+    decision_id: str,
+    assumptions: tuple[ScenarioAssumption, ...],
+    scenario: ScenarioResult,
+    roles: tuple[RoleResponse | RevisionRoleResponse, ...],
+    evidence_ids: tuple[str, ...],
+) -> str:
+    """Hash canonical trusted state without drafts, floats, time, or AI output."""
+    payload = {
+        "decision_id": decision_id,
+        "accepted_assumptions": [
+            {
+                "assumption_id": item.assumption_id,
+                "key": item.key,
+                "value": _canonical_decimal(item.value),
+                "unit": item.unit,
+                "currency": item.currency,
+            }
+            for item in assumptions
+        ],
+        "scenario": {
+            "status": scenario.status.value,
+            "expected_incremental_retained": _required_decimal_text(
+                scenario.expected_incremental_retained
+            ),
+            "expected_scenario_value": _required_decimal_text(
+                scenario.expected_scenario_value
+            ),
+            "intervention_cost": _required_decimal_text(scenario.intervention_cost),
+            "net_scenario_value": _required_decimal_text(scenario.net_scenario_value),
+            "break_even_lift": _required_decimal_text(scenario.break_even_lift),
+            "currency": scenario.currency,
+        },
+        "role_states": _role_state_payload(roles),
+        "governed_evidence_ids": list(evidence_ids),
+        "foundation": {
+            "observed_evidence_locked": True,
+            "data_health_checked": True,
+            "source_provenance_locked": True,
+        },
+    }
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _assumptions_match_baseline(
+    assumptions: tuple[ScenarioAssumption, ...],
+) -> bool:
+    """Compare logical accepted values without revision-ID sensitivity."""
+    baseline = _baseline_assumptions()
+    return all(
+        (
+            submitted.key,
+            _canonical_decimal(submitted.value),
+            submitted.unit,
+            submitted.currency,
+        )
+        == (
+            original.key,
+            _canonical_decimal(original.value),
+            original.unit,
+            original.currency,
+        )
+        for submitted, original in zip(assumptions, baseline, strict=True)
+    )
 
 
 def _prepare_product_context() -> _PreparedProductContext:
@@ -450,6 +607,7 @@ def _build_demo_decision() -> DemoDecisionResponse:
     context = _prepare_product_context()
     assumptions = _baseline_assumptions()
     scenario = calculate_break_even_scenario(assumptions, scenario_id="scn-001", revision_id="rev-001")
+    evidence_ids = tuple(item.evidence_id for item in context.business_evidence)
     return DemoDecisionResponse(
         decision=_decision_response(context),
         revision=RevisionResponse(revision_id="rev-001", label="Baseline"),
@@ -457,6 +615,13 @@ def _build_demo_decision() -> DemoDecisionResponse:
         assumptions=_assumption_response(assumptions),
         scenario=_scenario_response(scenario),
         roles=_BASELINE_ROLES,
+        accepted_state_fingerprint=_accepted_state_fingerprint(
+            decision_id="dec-001",
+            assumptions=assumptions,
+            scenario=scenario,
+            roles=_BASELINE_ROLES,
+            evidence_ids=evidence_ids,
+        ),
     )
 
 
@@ -574,7 +739,9 @@ def _revision_diff(
     )
 
 
-def _build_recalculated_decision(request: RecalculateDecisionRequest) -> RecalculatedDecisionResponse:
+def _rebuild_trusted_revision(
+    request: RecalculateDecisionRequest | RoleBriefRequest,
+) -> _TrustedRevisionBuild:
     """Rebuild context and execute exactly one trusted DD-3 revision."""
     context = _prepare_product_context()
     before_assumptions = _baseline_assumptions()
@@ -600,20 +767,171 @@ def _build_recalculated_decision(request: RecalculateDecisionRequest) -> Recalcu
     evidence = _revision_evidence(context, revision)
     if not all((evidence.observed_evidence_unchanged, evidence.data_health_unchanged, evidence.source_provenance_unchanged)):
         raise ValueError("The trusted product foundations changed unexpectedly.")
+    roles = _revision_roles(revision)
     diff = _revision_diff(revision, evidence)
     has_logical_change = bool(diff.changed_assumptions)
-    return RecalculatedDecisionResponse(
-        decision=_decision_response(context),
-        revision=RecalculatedRevisionResponse(
-            revision_id="rev-002" if has_logical_change else "rev-001",
-            label="Human revision" if has_logical_change else "Baseline",
-        ),
+    return _TrustedRevisionBuild(
+        context=context,
+        before_assumptions=before_assumptions,
+        after_assumptions=after_assumptions,
+        revision=revision,
         evidence=evidence,
-        assumptions=_assumption_response(after_assumptions),
-        before_scenario=_scenario_response(revision.before_projection.scenario_result),
-        scenario=_scenario_response(revision.after_projection.scenario_result),
-        roles=_revision_roles(revision),
+        roles=roles,
         diff=diff,
+        has_logical_change=has_logical_change,
+    )
+
+
+def _canonical_roles_for_state(
+    build: _TrustedRevisionBuild,
+) -> tuple[RoleResponse | RevisionRoleResponse, ...]:
+    """Use baseline role semantics when submitted values are logically baseline."""
+    if not build.has_logical_change and _assumptions_match_baseline(
+        build.after_assumptions
+    ):
+        return _BASELINE_ROLES
+    return build.roles
+
+
+def _fingerprint_for_build(build: _TrustedRevisionBuild) -> str:
+    """Create accepted-state identity from the trusted reconstructed DD-3 state."""
+    return _accepted_state_fingerprint(
+        decision_id="dec-001",
+        assumptions=build.after_assumptions,
+        scenario=build.revision.after_projection.scenario_result,
+        roles=_canonical_roles_for_state(build),
+        evidence_ids=tuple(item.evidence_id for item in build.context.business_evidence),
+    )
+
+
+def _build_recalculated_decision(request: RecalculateDecisionRequest) -> RecalculatedDecisionResponse:
+    """Return one bounded accepted revision reconstructed through DD-3."""
+    build = _rebuild_trusted_revision(request)
+    return RecalculatedDecisionResponse(
+        decision=_decision_response(build.context),
+        revision=RecalculatedRevisionResponse(
+            revision_id="rev-002" if build.has_logical_change else "rev-001",
+            label="Human revision" if build.has_logical_change else "Baseline",
+        ),
+        evidence=build.evidence,
+        assumptions=_assumption_response(build.after_assumptions),
+        before_scenario=_scenario_response(
+            build.revision.before_projection.scenario_result
+        ),
+        scenario=_scenario_response(build.revision.after_projection.scenario_result),
+        roles=build.roles,
+        diff=build.diff,
+        accepted_state_fingerprint=_fingerprint_for_build(build),
+    )
+
+
+def _role_brief_generation_context(
+    build: _TrustedRevisionBuild,
+) -> RoleBriefGenerationContext:
+    """Project only bounded trusted state needed for Granite interpretation."""
+    decision = _decision_response(build.context)
+    scenario = build.revision.after_projection.scenario_result
+    if scenario.currency != "USD":
+        raise ValueError("The trusted scenario currency is unsupported.")
+    role_payload = _role_state_payload(_canonical_roles_for_state(build))
+    evidence_details = _evidence_detail_response(build.context)
+    changed_assumptions = tuple(
+        ChangedAssumptionContext(
+            assumption_id=item.assumption_id,
+            before_value=_canonical_decimal(item.before_value),
+            after_value=_canonical_decimal(item.after_value),
+        )
+        for item in build.revision.decision_diff.changed_assumptions
+    )
+    role_states = tuple(
+        TrustedRoleStateContext(
+            role_key=item["role_key"],
+            state=item["state"],
+            impact_kind=item["impact_kind"],
+        )
+        for item in role_payload
+    )
+    governed_evidence = tuple(
+        GovernedEvidenceContext(
+            evidence_id=item.evidence_id,
+            label=item.label,
+            finding=item.finding,
+            scope="internal_observation",
+            limitations=item.limitations,
+            relevant_roles=item.relevant_roles,
+        )
+        for item in evidence_details
+    )
+    return RoleBriefGenerationContext(
+        decision=DecisionIdentityContext(
+            decision_id=decision.decision_id,
+            title=decision.title,
+            business_question=decision.business_question,
+        ),
+        revision=AcceptedRevisionContext(
+            revision_id="rev-002" if build.has_logical_change else "rev-001",
+            label="Human revision" if build.has_logical_change else "Baseline",
+        ),
+        scenario=TrustedScenarioContext(
+            status=scenario.status.value,
+            expected_incremental_retained=_required_decimal_text(
+                scenario.expected_incremental_retained
+            ),
+            expected_scenario_value=_required_decimal_text(
+                scenario.expected_scenario_value
+            ),
+            intervention_cost=_required_decimal_text(scenario.intervention_cost),
+            net_scenario_value=_required_decimal_text(scenario.net_scenario_value),
+            break_even_lift=_required_decimal_text(scenario.break_even_lift),
+            currency="USD",
+        ),
+        accepted_assumptions=tuple(
+            AcceptedAssumptionContext(
+                assumption_id=item.assumption_id,
+                label=_ASSUMPTION_LABELS[item.key],
+                value=_canonical_decimal(item.value),
+                unit=item.unit,
+                currency=item.currency,
+            )
+            for item in build.after_assumptions
+        ),
+        changed_assumptions=changed_assumptions,
+        role_states=role_states,
+        role_targets=build_role_brief_targets(
+            role_states,
+            governed_evidence,
+            changed_assumptions,
+        ),
+        governed_evidence=governed_evidence,
+        foundation=FoundationStateContext(
+            observed_evidence="unchanged" if build.has_logical_change else "locked",
+            data_health="unchanged" if build.has_logical_change else "checked",
+            source_provenance="unchanged" if build.has_logical_change else "locked",
+        ),
+    )
+
+
+def _build_role_brief_provider() -> GraniteRoleBriefProvider:
+    """Construct the live provider only for an explicit role-brief request."""
+    return GraniteRoleBriefProvider.from_env()
+
+
+def _generate_role_briefs(request: RoleBriefRequest) -> RoleBriefResponse:
+    """Reconstruct trusted state, make one Granite call, and bound the response."""
+    build = _rebuild_trusted_revision(request)
+    context = _role_brief_generation_context(build)
+    fingerprint = _fingerprint_for_build(build)
+    plan = build_role_brief_plan_set(
+        fingerprint=fingerprint,
+        context=context,
+    )
+    provider = _build_role_brief_provider()
+    brief_set = provider.generate(plan, context)
+    return RoleBriefResponse(
+        accepted_state_fingerprint=fingerprint,
+        provider="IBM watsonx.ai",
+        model_id=provider.model_id,
+        briefs=brief_set.briefs,
     )
 
 
@@ -662,3 +980,14 @@ def recalculate_demo_decision(request: RecalculateDecisionRequest) -> Recalculat
         raise HTTPException(status_code=422, detail=_INVALID_ASSUMPTIONS_ERROR) from None
     except Exception:
         raise HTTPException(status_code=503, detail=_RECALCULATION_ERROR) from None
+
+
+@app.post("/api/demo/decision/role-brief", response_model=RoleBriefResponse)
+def generate_demo_decision_role_brief(request: RoleBriefRequest) -> RoleBriefResponse:
+    """Generate five validated interpretations from server-rebuilt trusted state."""
+    try:
+        return _generate_role_briefs(request)
+    except _InvalidDecisionAssumptions:
+        raise HTTPException(status_code=422, detail=_INVALID_ASSUMPTIONS_ERROR) from None
+    except Exception:
+        raise HTTPException(status_code=503, detail=_ROLE_BRIEF_ERROR) from None

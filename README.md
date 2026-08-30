@@ -29,6 +29,17 @@ npm run dev
 
 Open `http://localhost:5173`. The Vite development server proxies `/api` requests to `http://127.0.0.1:8000`.
 
+For explicit live IBM Granite role-brief generation, configure these environment variables before starting the backend:
+
+```text
+WATSONX_URL
+WATSONX_APIKEY
+WATSONX_PROJECT_ID
+WATSONX_MODEL_ID
+```
+
+`WATSONX_MODEL_ID` is optional and defaults to `ibm/granite-4-h-small`. Credentials must not be committed.
+
 ## Demo Data
 
 The committed public demo assets and their third-party provenance are documented in [sample_data/public/README.md](sample_data/public/README.md).

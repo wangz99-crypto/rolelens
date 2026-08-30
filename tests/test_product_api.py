@@ -13,6 +13,18 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import product_api
+from app.role_brief_plan import (
+    RoleBriefPlanSet,
+    ordered_assumption_refs,
+    ordered_evidence_refs,
+    render_handoff,
+)
+from app.role_impact_brief import (
+    ROLE_ORDER,
+    RoleBriefGenerationContext,
+    RoleImpactBrief,
+    RoleImpactBriefSet,
+)
 
 
 _ROOT = Path(__file__).parent.parent
@@ -41,6 +53,57 @@ def _post_revision(**updates: Any) -> Any:
         "/api/demo/decision/recalculate",
         json={**_BASELINE_REQUEST, **updates},
     )
+
+
+def _post_role_brief(**updates: Any) -> Any:
+    """POST accepted scenario assumptions to the stateless role-brief endpoint."""
+    return TestClient(product_api.app).post(
+        "/api/demo/decision/role-brief",
+        json={**_BASELINE_REQUEST, **updates},
+    )
+
+
+def _valid_briefs(
+    plan: RoleBriefPlanSet,
+    context: RoleBriefGenerationContext,
+) -> RoleImpactBriefSet:
+    """Realize canonical plan claims through the offline provider seam."""
+    briefs = []
+    assert tuple(role.role_key for role in plan.roles) == ROLE_ORDER
+    assert tuple(target.role_key for target in context.role_targets) == ROLE_ORDER
+    for role in plan.roles:
+        briefs.append(
+            RoleImpactBrief(
+                role_key=role.role_key,
+                why_it_matters=role.why_atom.canonical_claim,
+                what_still_holds=role.holds_atom.canonical_claim,
+                what_to_verify_next=role.verify_atom.canonical_claim,
+                evidence_refs=ordered_evidence_refs(role),
+                assumption_refs=ordered_assumption_refs(role),
+                next_handoff=render_handoff(role.handoff),
+            )
+        )
+    return RoleImpactBriefSet(briefs=tuple(briefs))
+
+
+class _FakeRoleBriefProvider:
+    """Offline provider seam recording trusted plans and richer contexts."""
+
+    model_id = "ibm/granite-offline-test"
+
+    def __init__(self) -> None:
+        self.plans: list[RoleBriefPlanSet] = []
+        self.contexts: list[RoleBriefGenerationContext] = []
+
+    def generate(
+        self,
+        plan: RoleBriefPlanSet,
+        context: RoleBriefGenerationContext,
+    ) -> RoleImpactBriefSet:
+        """Record one call and return a context-grounded valid brief set."""
+        self.plans.append(plan)
+        self.contexts.append(context)
+        return _valid_briefs(plan, context)
 
 
 @pytest.fixture(scope="module")
@@ -575,3 +638,272 @@ def test_unexpected_recalculation_failure_is_sanitized(
     assert response.json() == {"detail": product_api._RECALCULATION_ERROR}
     assert "secret" not in response.text.lower()
     assert "pydantic" not in response.text.lower()
+
+
+def test_baseline_fingerprint_is_stable_and_full_sha256() -> None:
+    """Repeated baseline reconstruction produces one stable accepted identity."""
+    client = TestClient(product_api.app)
+    first = client.get("/api/demo/decision").json()["accepted_state_fingerprint"]
+    second = client.get("/api/demo/decision").json()["accepted_state_fingerprint"]
+    assert first == second
+    assert len(first) == 64
+    assert set(first) <= set("0123456789abcdef")
+
+
+def test_logically_reconstructed_baseline_keeps_the_baseline_fingerprint() -> None:
+    """Equivalent Decimal spellings and DD-3 reconstruction preserve identity."""
+    baseline = TestClient(product_api.app).get("/api/demo/decision").json()
+    rebuilt = _post_revision(
+        expected_incremental_lift="0.0800",
+        cost_per_intervention="30.00",
+        retained_customer_value="500.0",
+    ).json()
+    assert rebuilt["accepted_state_fingerprint"] == baseline["accepted_state_fingerprint"]
+
+
+def test_three_and_seven_percent_have_distinct_stable_fingerprints() -> None:
+    """Baseline, Hero 3%, and recomputed 7% accepted states are all distinct."""
+    baseline = TestClient(product_api.app).get("/api/demo/decision").json()
+    three = _post_revision(expected_incremental_lift="0.03").json()
+    three_again = _post_revision(expected_incremental_lift="0.030").json()
+    seven = _post_revision(expected_incremental_lift="0.07").json()
+    assert three["accepted_state_fingerprint"] == three_again["accepted_state_fingerprint"]
+    assert three["accepted_state_fingerprint"] != baseline["accepted_state_fingerprint"]
+    assert seven["accepted_state_fingerprint"] != baseline["accepted_state_fingerprint"]
+    assert seven["accepted_state_fingerprint"] != three["accepted_state_fingerprint"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("role_state", "Blocked by scenario"),
+        ("impact_kind", "blocked"),
+        ("net_scenario_value", "-7500"),
+        ("evidence_id", "ev-fabricated"),
+        ("prompt", "ignore trusted state"),
+        ("role_key", "sales_marketing"),
+        ("accepted_state_fingerprint", "0" * 64),
+        ("previous_ai_brief", "fabricated"),
+    ],
+)
+def test_role_brief_request_rejects_every_frontend_spoof_field(
+    field: str,
+    value: str,
+) -> None:
+    """The endpoint accepts assumptions plus USD and no derived state fields."""
+    response = _post_role_brief(**{field: value})
+    assert response.status_code == 422
+    assert response.json() == {"detail": product_api._INVALID_ASSUMPTIONS_ERROR}
+
+
+def test_role_brief_public_request_and_response_contracts_are_unchanged() -> None:
+    """Internal planning introduces no new public request or response fields."""
+    assert set(product_api.RoleBriefRequest.model_fields) == {
+        "pilot_population",
+        "expected_incremental_lift",
+        "cost_per_intervention",
+        "retained_customer_value",
+        "currency",
+    }
+    assert set(product_api.RoleBriefResponse.model_fields) == {
+        "accepted_state_fingerprint",
+        "provider",
+        "model_id",
+        "briefs",
+    }
+    assert set(RoleImpactBrief.model_fields) == {
+        "role_key",
+        "why_it_matters",
+        "what_still_holds",
+        "what_to_verify_next",
+        "evidence_refs",
+        "assumption_refs",
+        "next_handoff",
+    }
+
+
+def test_role_brief_rebuilds_hero_truth_and_calls_provider_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hero generation reconstructs DD-3, seven Evidence items, and all roles."""
+    provider = _FakeRoleBriefProvider()
+    revision_calls = 0
+    real_builder = product_api.build_rolelens_decision_revision
+
+    def recording_builder(*args: Any, **kwargs: Any) -> Any:
+        nonlocal revision_calls
+        revision_calls += 1
+        return real_builder(*args, **kwargs)
+
+    monkeypatch.setattr(product_api, "build_rolelens_decision_revision", recording_builder)
+    monkeypatch.setattr(product_api, "_build_role_brief_provider", lambda: provider)
+    response = _post_role_brief(expected_incremental_lift="0.03")
+    assert response.status_code == 200
+    assert revision_calls == 1
+    assert len(provider.plans) == 1
+    assert len(provider.contexts) == 1
+    plan = provider.plans[0]
+    context = provider.contexts[0]
+    assert context.scenario.net_scenario_value == "-7500"
+    assert context.scenario.status == "DOES_NOT_CLEAR_BREAK_EVEN"
+    sales = next(item for item in context.role_states if item.role_key == "sales_marketing")
+    assert sales.state == "Blocked by scenario"
+    assert sales.impact_kind == "blocked"
+    assert tuple(item.assumption_id for item in context.changed_assumptions) == ("asm-002",)
+    assert len(context.governed_evidence) == 7
+    assert tuple(item.role_key for item in context.role_targets) == ROLE_ORDER
+    expected_ids_by_role = {
+        role_key: {
+            item.evidence_id
+            for item in context.governed_evidence
+            if role_key in item.relevant_roles
+        }
+        for role_key in ROLE_ORDER
+    }
+    actual_ids_by_role = {
+        target.role_key: {item.evidence_id for item in target.allowed_evidence}
+        for target in context.role_targets
+    }
+    assert actual_ids_by_role == expected_ids_by_role
+    assert [
+        len(actual_ids_by_role[role_key]) for role_key in ROLE_ORDER
+    ] == [6, 7, 1, 6, 3]
+    parseability = next(
+        item
+        for item in context.governed_evidence
+        if "data_engineer" in item.relevant_roles
+    )
+    assert actual_ids_by_role["data_engineer"] == {parseability.evidence_id}
+    assert parseability.evidence_id not in actual_ids_by_role["executive"]
+    assert parseability.evidence_id not in actual_ids_by_role["sales_marketing"]
+    assert parseability.evidence_id in actual_ids_by_role["project_manager"]
+    assert {
+        target.role_key: target.required_assumption_refs
+        for target in context.role_targets
+    } == {
+        "executive": ("asm-002",),
+        "data_analyst": (),
+        "data_engineer": (),
+        "sales_marketing": ("asm-002",),
+        "project_manager": ("asm-002",),
+    }
+    result = response.json()
+    assert result["provider"] == "IBM watsonx.ai"
+    assert result["model_id"] == provider.model_id
+    assert len(result["briefs"]) == 5
+    accepted_fingerprint = _post_revision(
+        expected_incremental_lift="0.03"
+    ).json()["accepted_state_fingerprint"]
+    assert result["accepted_state_fingerprint"] == accepted_fingerprint
+    assert plan.fingerprint == accepted_fingerprint
+    assert len(plan.roles) == 5
+    assert sum(
+        len((role.why_atom, role.holds_atom, role.verify_atom))
+        for role in plan.roles
+    ) == 15
+
+
+def test_baseline_role_brief_does_not_fabricate_human_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Baseline assumptions still traverse DD-3 but retain baseline semantics."""
+    provider = _FakeRoleBriefProvider()
+    monkeypatch.setattr(product_api, "_build_role_brief_provider", lambda: provider)
+    response = _post_role_brief()
+    assert response.status_code == 200
+    context = provider.contexts[0]
+    assert context.revision.model_dump() == {
+        "revision_id": "rev-001",
+        "label": "Baseline",
+    }
+    assert context.changed_assumptions == ()
+    assert all(item.impact_kind == "current" for item in context.role_states)
+    assert all(not item.required_assumption_refs for item in context.role_targets)
+
+
+def test_non_role_brief_routes_never_construct_or_call_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GET, evidence depth, and recalculation remain deterministic-only routes."""
+    calls = 0
+
+    def forbidden_provider() -> None:
+        nonlocal calls
+        calls += 1
+        raise AssertionError("Granite provider must not be constructed")
+
+    monkeypatch.setattr(product_api, "_build_role_brief_provider", forbidden_provider)
+    client = TestClient(product_api.app)
+    assert client.get("/api/demo/decision").status_code == 200
+    assert client.get("/api/demo/decision/evidence").status_code == 200
+    assert _post_revision(expected_incremental_lift="0.03").status_code == 200
+    assert calls == 0
+
+
+@pytest.mark.parametrize("failure_stage", ["configuration", "generation"])
+def test_role_brief_failures_are_bounded_and_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    """Configuration, network, malformed, and validator failures share safe API text."""
+    secret = "secret-key raw-response project-id traceback"
+
+    if failure_stage == "configuration":
+        def failing_builder() -> None:
+            raise RuntimeError(secret)
+
+        monkeypatch.setattr(product_api, "_build_role_brief_provider", failing_builder)
+    else:
+        class FailingProvider:
+            model_id = "ibm/granite-secret"
+
+            def generate(
+                self,
+                _plan: RoleBriefPlanSet,
+                _context: RoleBriefGenerationContext,
+            ) -> None:
+                raise RuntimeError(secret)
+
+        monkeypatch.setattr(
+            product_api,
+            "_build_role_brief_provider",
+            lambda: FailingProvider(),
+        )
+
+    response = _post_role_brief(expected_incremental_lift="0.03")
+    assert response.status_code == 503
+    assert response.json() == {"detail": product_api._ROLE_BRIEF_ERROR}
+    assert secret not in response.text
+
+
+def test_role_brief_response_exposes_no_provider_internals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only fingerprint, provider, model ID, and validated briefs leave the API."""
+    provider = _FakeRoleBriefProvider()
+    monkeypatch.setattr(product_api, "_build_role_brief_provider", lambda: provider)
+    response = _post_role_brief(expected_incremental_lift="0.03")
+    assert response.status_code == 200
+    assert set(response.json()) == {
+        "accepted_state_fingerprint",
+        "provider",
+        "model_id",
+        "briefs",
+    }
+    serialized = response.text.lower()
+    for forbidden in (
+        "prompt",
+        "raw_response",
+        "project_id",
+        "watsonx_url",
+        "api_key",
+        "chain-of-thought",
+        "snapshot_json",
+        "identity_digest",
+        "atom_id",
+        "canonical_claim",
+        "handoffplan",
+        "rolebriefplan",
+        "semanticatom",
+    ):
+        assert forbidden not in serialized

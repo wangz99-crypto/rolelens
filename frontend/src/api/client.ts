@@ -3,12 +3,15 @@ import type {
   EvidenceDetail,
   RecalculateDecisionInput,
   RecalculatedDecision,
+  RoleImpactBriefSetResponse,
 } from "./types";
 
 const SAFE_LOAD_ERROR = "RoleLens could not load the demo decision safely.";
 const SAFE_RECALCULATION_ERROR =
   "Decision impact could not be recalculated safely.";
 const SAFE_EVIDENCE_ERROR = "Evidence details could not be loaded safely.";
+const SAFE_ROLE_BRIEF_ERROR =
+  "IBM Granite Role Brief could not be generated safely.";
 
 export class DemoDecisionLoadError extends Error {
   constructor() {
@@ -45,6 +48,13 @@ export class EvidenceDetailLoadError extends Error {
   }
 }
 
+export class RoleBriefGenerationError extends Error {
+  constructor() {
+    super(SAFE_ROLE_BRIEF_ERROR);
+    this.name = "RoleBriefGenerationError";
+  }
+}
+
 export async function getDemoDecisionEvidence(): Promise<EvidenceDetail[]> {
   try {
     const response = await fetch("/api/demo/decision/evidence", {
@@ -77,5 +87,26 @@ export async function recalculateDecision(
     return (await response.json()) as RecalculatedDecision;
   } catch {
     throw new DecisionRecalculationError();
+  }
+}
+
+export async function generateRoleBriefs(
+  input: RecalculateDecisionInput,
+): Promise<RoleImpactBriefSetResponse> {
+  try {
+    const response = await fetch("/api/demo/decision/role-brief", {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(input),
+    });
+    if (!response.ok) {
+      throw new RoleBriefGenerationError();
+    }
+    return (await response.json()) as RoleImpactBriefSetResponse;
+  } catch {
+    throw new RoleBriefGenerationError();
   }
 }

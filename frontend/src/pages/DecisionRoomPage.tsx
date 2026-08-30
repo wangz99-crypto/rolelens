@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { GitBranch } from "lucide-react";
 import {
+  generateRoleBriefs,
   getDemoDecisionEvidence,
   recalculateDecision,
 } from "../api/client";
@@ -19,6 +20,9 @@ import {
   type DemoDecision,
   type EvidenceDetail,
   type ProductDecision,
+  type RecalculateDecisionInput,
+  type RoleBriefLifecycle,
+  type RoleImpactBriefSetResponse,
   type RoleKey,
 } from "../api/types";
 import { AppSidebar } from "../components/AppSidebar";
@@ -94,6 +98,24 @@ function draftMatches(
   }
 }
 
+export function roleBriefRequestFromTrusted(
+  assumptions: Assumption[],
+): RecalculateDecisionInput {
+  return {
+    pilot_population: valueFor(assumptions, "pilot_population"),
+    expected_incremental_lift: canonicalDecimalString(
+      valueFor(assumptions, "expected_incremental_lift"),
+    ),
+    cost_per_intervention: canonicalDecimalString(
+      valueFor(assumptions, "cost_per_intervention"),
+    ),
+    retained_customer_value: canonicalDecimalString(
+      valueFor(assumptions, "retained_customer_value"),
+    ),
+    currency: "USD",
+  };
+}
+
 export function DecisionRoomPage({ data }: DecisionRoomPageProps) {
   const [trusted, setTrusted] = useState<ProductDecision>(data);
   const [draft, setDraft] = useState<AssumptionDraft>(() =>
@@ -109,7 +131,16 @@ export function DecisionRoomPage({ data }: DecisionRoomPageProps) {
     status: "idle",
     data: [],
   });
+  const [briefSet, setBriefSet] =
+    useState<RoleImpactBriefSetResponse | null>(null);
+  const [isGeneratingBrief, setIsGeneratingBrief] = useState(false);
+  const [briefError, setBriefError] = useState<string | null>(null);
   const dirty = !draftMatches(draft, trusted.assumptions);
+  const briefLifecycle: RoleBriefLifecycle = !briefSet
+    ? "NOT_GENERATED"
+    : briefSet.accepted_state_fingerprint === trusted.accepted_state_fingerprint
+      ? "CURRENT"
+      : "STALE";
 
   const closeDrawer = useCallback(() => setActiveDrawer(null), []);
 
@@ -174,6 +205,24 @@ export function DecisionRoomPage({ data }: DecisionRoomPageProps) {
     }
   }
 
+  async function generateBrief() {
+    if (dirty || isGeneratingBrief) {
+      return;
+    }
+    setIsGeneratingBrief(true);
+    setBriefError(null);
+    try {
+      const result = await generateRoleBriefs(
+        roleBriefRequestFromTrusted(trusted.assumptions),
+      );
+      setBriefSet(result);
+    } catch {
+      setBriefError("IBM Granite Role Brief could not be generated safely.");
+    } finally {
+      setIsGeneratingBrief(false);
+    }
+  }
+
   const scenarioTone = scenarioStatusTone(trusted.scenario.status);
 
   return (
@@ -197,7 +246,21 @@ export function DecisionRoomPage({ data }: DecisionRoomPageProps) {
               <StatusBadge tone={scenarioTone}>
                 {scenarioStatusBadgeLabel(trusted.scenario.status)}
               </StatusBadge>
-              <StatusBadge tone="neutral">AI Brief not generated</StatusBadge>
+              <StatusBadge
+                tone={
+                  briefLifecycle === "CURRENT"
+                    ? "ai"
+                    : briefLifecycle === "STALE"
+                      ? "assumption"
+                      : "neutral"
+                }
+              >
+                {briefLifecycle === "CURRENT"
+                  ? "AI Brief current"
+                  : briefLifecycle === "STALE"
+                    ? "AI Brief stale"
+                    : "AI Brief not generated"}
+              </StatusBadge>
             </div>
           </div>
           <button
@@ -248,6 +311,11 @@ export function DecisionRoomPage({ data }: DecisionRoomPageProps) {
           evidenceStatus={evidenceDetail.status === "idle" ? "loading" : evidenceDetail.status}
           evidence={evidenceDetail.data}
           dirty={dirty}
+          briefSet={briefSet}
+          briefLifecycle={briefLifecycle}
+          isGeneratingBrief={isGeneratingBrief}
+          briefError={briefError}
+          onGenerateBrief={generateBrief}
           onClose={closeDrawer}
         />
       )}

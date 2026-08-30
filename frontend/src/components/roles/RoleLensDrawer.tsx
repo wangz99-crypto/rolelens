@@ -3,6 +3,9 @@ import type {
   EvidenceDetail,
   ImpactKind,
   ProductDecision,
+  RoleBriefLifecycle,
+  RoleImpactBrief,
+  RoleImpactBriefSetResponse,
   RoleKey,
 } from "../../api/types";
 import { isRecalculatedDecision } from "../../api/types";
@@ -20,6 +23,11 @@ interface RoleLensDrawerProps {
   evidenceStatus: "loading" | "loaded" | "error";
   evidence: EvidenceDetail[];
   dirty: boolean;
+  briefSet: RoleImpactBriefSetResponse | null;
+  briefLifecycle: RoleBriefLifecycle;
+  isGeneratingBrief: boolean;
+  briefError: string | null;
+  onGenerateBrief: () => void;
   onClose: () => void;
 }
 
@@ -35,12 +43,18 @@ export function RoleLensDrawer({
   evidenceStatus,
   evidence,
   dirty,
+  briefSet,
+  briefLifecycle,
+  isGeneratingBrief,
+  briefError,
+  onGenerateBrief,
   onClose,
 }: RoleLensDrawerProps) {
   const role = currentRole(data, roleKey);
   const relevantEvidence = evidence.filter((item) =>
     item.relevant_roles.includes(roleKey),
   );
+  const brief = briefSet?.briefs.find((item) => item.role_key === roleKey);
 
   return (
     <Drawer labelledBy="role-lens-drawer-title" onClose={onClose}>
@@ -66,13 +80,6 @@ export function RoleLensDrawer({
 
       {scenarioRoles.has(roleKey) && (
         <ScenarioContext data={data} />
-      )}
-
-      {roleKey === "data_analyst" && (
-        <EvidenceContext
-          status={evidenceStatus}
-          evidence={relevantEvidence}
-        />
       )}
 
       {roleKey === "data_analyst" && (
@@ -108,22 +115,148 @@ export function RoleLensDrawer({
         </RoleSection>
       )}
 
-      {roleKey !== "data_analyst" && (
-        <EvidenceContext
-          status={evidenceStatus}
-          evidence={relevantEvidence}
-        />
-      )}
+      <GraniteBrief
+        lifecycle={briefLifecycle}
+        brief={brief}
+        data={data}
+        evidence={evidence}
+        dirty={dirty}
+        isGenerating={isGeneratingBrief}
+        error={briefError}
+        onGenerate={onGenerateBrief}
+      />
 
-      <RoleSection title="IBM Granite Brief">
-        <p className="text-xs font-bold tracking-[0.14em] text-slate-300">
-          NOT GENERATED
-        </p>
-        <p className="mt-2 text-xs leading-5 text-slate-500">
-          Role-aware interpretation has not been generated yet.
-        </p>
-      </RoleSection>
+      <EvidenceContext
+        status={evidenceStatus}
+        evidence={relevantEvidence}
+      />
     </Drawer>
+  );
+}
+
+function GraniteBrief({
+  lifecycle,
+  brief,
+  data,
+  evidence,
+  dirty,
+  isGenerating,
+  error,
+  onGenerate,
+}: {
+  lifecycle: RoleBriefLifecycle;
+  brief: RoleImpactBrief | undefined;
+  data: ProductDecision;
+  evidence: EvidenceDetail[];
+  dirty: boolean;
+  isGenerating: boolean;
+  error: string | null;
+  onGenerate: () => void;
+}) {
+  const hasBrief = lifecycle !== "NOT_GENERATED" && brief !== undefined;
+  const evidenceLabels = brief?.evidence_refs.map(
+    (reference) =>
+      evidence.find((item) => item.evidence_id === reference)?.label ?? reference,
+  );
+  const assumptionLabels = brief?.assumption_refs.map(
+    (reference) =>
+      data.assumptions.find((item) => item.assumption_id === reference)?.label ??
+      reference,
+  );
+  return (
+    <RoleSection title="IBM Granite Brief">
+      <div
+        className={`rounded-xl border p-4 ${
+          lifecycle === "STALE"
+            ? "border-amber-400/25 bg-amber-400/[0.05]"
+            : hasBrief
+              ? "border-violet-400/25 bg-violet-400/[0.06]"
+              : "border-slate-700 bg-slate-900/50"
+        }`}
+      >
+        <p
+          className={`text-xs font-bold tracking-[0.14em] ${
+            lifecycle === "STALE"
+              ? "text-amber-200"
+              : hasBrief
+                ? "text-violet-200"
+                : "text-slate-300"
+          }`}
+        >
+          {lifecycle.replace("_", " ")}
+        </p>
+        {lifecycle === "NOT_GENERATED" && (
+          <p className="mt-2 text-xs leading-5 text-slate-500">
+            Role-aware interpretation has not been generated yet.
+          </p>
+        )}
+        {lifecycle === "STALE" && (
+          <p className="mt-2 text-xs leading-5 text-amber-100/80">
+            This brief was generated for the previous accepted decision state.
+          </p>
+        )}
+        {hasBrief && brief && (
+          <div className="mt-4 space-y-4">
+            <p className="text-[10px] font-semibold tracking-[0.1em] text-violet-300">
+              IBM Granite · watsonx.ai
+            </p>
+            <BriefField title="Why it matters" text={brief.why_it_matters} />
+            <BriefField title="What still holds" text={brief.what_still_holds} />
+            <BriefField
+              title="What to verify next"
+              text={brief.what_to_verify_next}
+            />
+            <BriefField title="Next handoff" text={brief.next_handoff} />
+            <div>
+              <h4 className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
+                Grounding
+              </h4>
+              <p className="mt-1.5 text-xs leading-5 text-slate-300">
+                Evidence: {evidenceLabels?.join(", ")}
+              </p>
+              <p className="text-xs leading-5 text-slate-300">
+                Assumptions: {assumptionLabels?.join(", ") || "None"}
+              </p>
+            </div>
+          </div>
+        )}
+        {dirty && (
+          <p className="mt-4 text-xs leading-5 text-amber-200">
+            Recalculate or revert the unsaved assumption edit before generating a new brief.
+          </p>
+        )}
+        {error && (
+          <p role="alert" className="mt-4 text-xs leading-5 text-red-200">
+            {error}
+          </p>
+        )}
+        {lifecycle !== "CURRENT" && (
+          <button
+            type="button"
+            disabled={dirty || isGenerating}
+            onClick={onGenerate}
+            className="mt-4 rounded-lg border border-violet-400/30 bg-violet-400/10 px-3 py-2 text-xs font-semibold text-violet-100 transition hover:bg-violet-400/15 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isGenerating
+              ? "Generating…"
+              : lifecycle === "STALE"
+                ? "Refresh Role Brief"
+                : "Generate Role Brief"}
+          </button>
+        )}
+      </div>
+    </RoleSection>
+  );
+}
+
+function BriefField({ title, text }: { title: string; text: string }) {
+  return (
+    <div>
+      <h4 className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
+        {title}
+      </h4>
+      <p className="mt-1.5 text-xs leading-5 text-slate-200">{text}</p>
+    </div>
   );
 }
 
