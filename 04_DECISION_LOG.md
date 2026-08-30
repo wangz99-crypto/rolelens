@@ -475,3 +475,22 @@ Approved for independent IBM Bob implementation.
 ### Revisit Date
 
 After Task 5B production tests pass and after Task 6B live-provider latency/cost measurements.
+
+---
+
+## Decision 004
+
+**Date:** 2026-08-30
+**Area:** August 2026 Wildcard Submission Identity
+
+### Decision
+
+RoleLens will be submitted in the August 2026 monthly competition. The selected track is **Wildcard Challenge — Build Intelligent Systems for the Future of Work**.
+
+This is a submission-identity update, not a claim that RoleLens development began in August. Historical July research, architecture decisions, IBM Bob work, evaluations, commit references, and dated project records remain historically unchanged.
+
+Active submission-facing documentation must use the August 2026 identity. The current project phase is **Slice 5 — Competition Finish**.
+
+### Status
+
+Accepted for active competition-facing documentation.

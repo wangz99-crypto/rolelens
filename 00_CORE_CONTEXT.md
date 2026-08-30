@@ -1,16 +1,16 @@
 # 00_CORE_CONTEXT.md — RoleLens
 
-> Updated: 2026-07-14
+> Updated: 2026-08-30
 > Status: Canonical project context
 > Purpose: Shared source of truth for IBM Bob, Codex, and human review.
 
 ## Project
 
-IBM AI Builders Challenge — July 2026
+IBM AI Builders Challenge — August 2026
 
 Participant: Zhe Wang — University of Dayton — M.S. Business Analytics — solo participant
 
-Challenge track: Wild Card Challenge — Build Intelligent Systems for the Future of Work
+Challenge track: Wildcard Challenge — Build Intelligent Systems for the Future of Work
 
 ## Selected Direction
 
@@ -57,32 +57,11 @@ Mixed business materials
 
 ## Current Phase
 
-**Phase 2 — Evidence Completion Before Role Generation**
+**Slice 5 — Competition Finish**
 
-Tasks 1–5 established the deterministic CSV evidence-provenance backend. The identity and provenance repair is committed, and the full repository suite reports **675 tests passing with zero failures**.
+RoleLens now has a working product prototype with a FastAPI backend, React decision workspace, deterministic scenario and role-impact logic, governed Evidence, and explicit IBM Granite role-brief generation. The current Slice 5 task is submission completion and reconciliation of active competition-facing documentation with the implemented product.
 
-The implemented path is:
-
-```text
-CSV bytes
-→ SourceManifestEntry
-→ DataFrame
-→ DataHealthSummary + HealthFindingCandidate
-→ EvidenceObject
-```
-
-Pasted text and structured user context can currently be registered as sources, but they do not yet produce production `EvidenceObject` records. Local disposable Codex spikes established the Task 5B and Task 6 contracts. The spike code remains local-only and must not be merged, cherry-picked, copied, or represented as production implementation.
-
-### Current production milestone commits
-
-| Commit | Milestone |
-|---|---|
-| `6b8a6a9` | Deterministic identity and provenance integrity repair |
-| `0a91464` | Task 5 — Evidence Object builder |
-| `d6785a1` | Task 4 — CSV parsing and deterministic data health |
-| `13ffafe` | Task 3 — CSV and pasted-text source intake |
-| `9ff0040` | Task 2 — Deterministic identity |
-| `29104c2` | Task 1 — Core schemas |
+Historical July research, architecture decisions, Bob work, evaluations, and dated project records remain historically accurate; they do not define the active August submission identity.
 
 ## Current Top Risks
 
