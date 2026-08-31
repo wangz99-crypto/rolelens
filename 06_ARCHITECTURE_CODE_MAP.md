@@ -1,9 +1,86 @@
 # 06_ARCHITECTURE_CODE_MAP.md — RoleLens
 
-> 更新日期：2026-07-14
-> 状态：Architecture v3 — Task 5B and grounded Role Engine sequence approved
+> 更新日期：2026-08-30
+> 状态：Final evaluator architecture reconciled; July 2026 architecture record retained below
 
-# 1. Architecture Overview
+# Current Final Architecture
+
+## Runtime shape
+
+- **Evaluator frontend:** React + TypeScript + Vite, with Tailwind CSS and React Flow for the Decision Room.
+- **Product backend:** FastAPI + Python, with Pydantic contracts, pandas-backed data preparation, and deterministic Decimal scenario arithmetic.
+- **Runtime AI:** IBM Granite through watsonx.ai for bounded role-readable realization. One explicit Generate or Refresh action produces all five role briefs in one structured chat call.
+- **State boundary:** the backend rebuilds trusted demo state per request; accepted revision history and draft state are held in the browser session. No database or enterprise approval system is implied.
+
+The five user-visible roles remain governed views over shared Evidence and accepted decision state: Executive, Data Analyst / Data Scientist, Data Engineer, Sales / Marketing, and Project Manager. They are not autonomous agents. `config/role_policy.json` remains the machine-readable role-boundary authority.
+
+## Evaluator flow
+
+```text
+business evidence
+    ↓
+accepted assumptions
+    ↓
+deterministic break-even scenario result
+    ↓
+governed five-role decision state
+    ↓
+human edits an assumption as an unsaved draft
+    ↓
+human accepts Recalculate
+    ↓
+deterministic recomputation + Decision Diff
+    ↓
+dependent outputs become unchanged / changed / blocked / stale / recomputed
+    ↓
+refreshed Granite role-impact brief from the accepted-state fingerprint
+```
+
+Draft edits do not mutate trusted state. Recalculate validates the request, rebuilds the accepted scenario, propagates dependency-aware impacts, and returns a new accepted-state fingerprint. A previously generated brief remains current during an unsaved draft and becomes stale only when its fingerprint no longer matches the accepted state.
+
+## Implemented control and data layers
+
+| Concern | Current implementation |
+|---|---|
+| Source identity and provenance | `identity.py`, `file_intake.py`, `text_parser.py`, and frozen source/locator schemas provide deterministic source identity and exact provenance boundaries. |
+| Data and Evidence foundation | `data_parser.py`, `data_health.py`, `business_profile.py`, `context_evidence.py`, `evidence_builder.py`, and `demo_pipeline.py` prepare governed Evidence Objects without allowing raw inputs to bypass validation. |
+| Accepted assumptions and scenario math | `decision_diff.py` validates explicit scenario assumptions and performs deterministic Decimal break-even calculations. Scenario lift remains a fraction at the API boundary. |
+| Decision Diff and impact propagation | `decision_diff_engine.py` propagates declared dependencies; `decision_diff_rolelens.py` projects the result into the bounded RoleLens decision and five governed role states. |
+| Product API | `product_api.py` exposes health, demo decision, evidence detail, recalculation, and role-brief endpoints through frozen response contracts and fail-closed errors. |
+| Revision and lifecycle presentation | The React Decision Room keeps draft edits separate from accepted state, presents browser-session revision history, and derives `NOT_GENERATED`, `CURRENT`, or `STALE` brief lifecycle from accepted-state fingerprints. |
+| Governed Granite brief | `role_brief_plan.py` deterministically creates five role plans with three SemanticAtoms each. `granite_role_brief_provider.py` makes one structured call; `role_impact_brief.py` validates the returned text and reconstructs governed references and handoffs. |
+| Risk controls | `risk_checker.py` enforces deterministic structural checks. `semantic_risk_reviewer.py` and `granite_semantic_risk_provider.py` implement bounded probabilistic semantic review where invoked; it remains non-authoritative and subject to human review. |
+
+Evidence IDs, assumption references, role posture, handoffs, scenario status, and accepted-state lifecycle are controlled by RoleLens rather than selected by Granite. Granite does not perform the financial calculation, approve work, authorize execution, or turn external context into company-specific proof.
+
+## Current evaluator-facing structure
+
+```text
+rolelens/
+├── app/
+│   ├── product_api.py                  FastAPI evaluator API
+│   ├── decision_diff.py                deterministic scenario calculation
+│   ├── decision_diff_engine.py         dependency-aware impact propagation
+│   ├── decision_diff_rolelens.py       five-role decision projection
+│   ├── role_brief_plan.py              deterministic SemanticAtom plan
+│   ├── granite_role_brief_provider.py  one-call watsonx.ai adapter
+│   ├── role_impact_brief.py            authoritative brief validation
+│   ├── risk_checker.py                 deterministic risk controls
+│   └── ...                             retained evidence and earlier pipeline modules
+├── frontend/                           React + TypeScript + Vite Decision Room
+├── config/role_policy.json             five-role runtime policy authority
+├── sample_data/public/                 licensed demo data and provenance
+├── tests/                              backend and product contract tests
+└── docs/                               evaluation, build evidence, and history
+```
+
+The current evaluator Hero is the accepted-assumption revision from 3% lift to 7% lift: the scenario moves from not clearing to clearing modeled break-even, Sales / Marketing moves from blocked to eligible for review, observed Evidence stays unchanged, and the older Granite brief becomes stale until refreshed.
+
+# Historical Architecture Record — July 2026
+
+The sections below preserve the earlier Streamlit-first vertical-slice plan and architecture evolution. Task labels, proposed module order, provisional provider-call topology, and the Streamlit evaluator description are historical planning context, not the current final evaluator architecture. Still-valid identity, provenance, Evidence, role-policy, risk, and lineage contracts remain part of the implemented foundation.
+
+## Historical 1. Architecture Overview
 
 ```text
 User Inputs
@@ -73,7 +150,7 @@ Business question and decision goal produce `decision_context` source records bu
 
 The conceptual five-call role design is provisional. Four non-PM roles may later run in parallel; Project Manager remains sequential. Final adoption depends on measured live-provider latency and cost.
 
-# 2. Recommended Project Structure
+## Historical 2. Recommended Project Structure
 
 ## User roles versus internal components
 
@@ -125,7 +202,7 @@ rolelens/
 
 A live-provider adapter filename is not locked until Task 6B provider selection. Do not add `app/config.py`, agent frameworks, vector storage, or provider abstractions beyond the minimum accepted protocol.
 
-# 3. Core Schemas
+## Historical 3. Core Schemas
 
 *All production schema models are defined in `app/schemas.py` and added only in their approved task.*
 
@@ -328,7 +405,7 @@ DecisionMemo          Task 9
 DecisionTrajectory    Integration / run-log task
 ```
 
-# 4. Module Map
+## Historical 4. Module Map
 
 ## schemas.py
 Purpose: frozen Pydantic contracts for identity, provenance, candidates, evidence, data health, and later grounded role results.
@@ -475,7 +552,7 @@ Suggested tabs:
 
 The UI must visibly distinguish internal observations, external context, stated priorities, assumptions, and decision context.
 
-# 5. Technical Guardrails
+## Historical 5. Technical Guardrails
 
 - Use frozen, extra-forbidden Pydantic models for production contracts.
 - Do not rely on free-form LLM text.

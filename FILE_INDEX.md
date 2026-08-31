@@ -1,6 +1,6 @@
 # RoleLens Project File Index
 
-> Updated: 2026-07-11  
+> Updated: 2026-08-30
 > Purpose: Explain which files are canonical, supporting, or historical.
 
 ## Canonical Active Set
@@ -19,9 +19,9 @@ These files may define current product truth:
 | `07_IBM_BOB_USAGE_LOG.md` | Detailed IBM Bob usage evidence |
 | `08_CRITIQUE_TEST_LOG.md` | Red-team risks and tests |
 | `09_PROMPT_KNOWLEDGE_BASE.md` | Prompt drafts subject to evaluation |
-| `role_policy.json` | Machine-readable five-role boundaries |
+| `config/role_policy.json` | Machine-readable five-role boundaries |
 | `reference_to_product_decisions.md` | Adopted/rejected ideas from references |
-| `README_outline_latest.md` | Only active README outline; becomes `README.md` after implementation |
+| `README.md` | Final public evaluator entry point and active repository README |
 | `docs/evaluation.md` | Evaluation scenarios and rubric |
 | `docs/bob_build_log.md` | Public-facing Bob build evidence |
 
@@ -44,11 +44,11 @@ Reference-derived roles and architecture patterns are not product requirements u
 
 ## Historical Archive
 
-`docs/archive/historical/` preserves superseded drafts for provenance. They are not active context and must not be supplied to an AI as current product truth without an explicit historical-analysis task.
+`docs/archive/historical/` preserves superseded drafts for provenance. This includes `README_outline_pre_submission.md`, the former root README outline. Historical files are not active context and must not be supplied to an AI as current product truth without an explicit historical-analysis task.
 
 ## Naming Policy
 
 - Canonical active files have stable names without dates or `(1)` suffixes.
-- Only one active README outline is allowed.
+- `README.md` is the only active public README; archived outlines are historical.
 - Dated drafts belong in the historical archive.
-- When the repository implementation starts, the final public entry point is `README.md`.
+- The final public entry point is `README.md`.

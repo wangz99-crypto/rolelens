@@ -192,7 +192,7 @@ Freeze rules:
 - Neither eight-scenario pack provides statistical proof of production
   reliability.
 
-Future calibration regression command:
+Calibration regression command retained for reproducibility:
 
 ```text
 python scripts/run_live_semantic_evaluation.py \
@@ -200,14 +200,30 @@ python scripts/run_live_semantic_evaluation.py \
   --scenario-pack calibration
 ```
 
-Future one-time holdout command, to be used only after the calibrated prompt is
-frozen and committed:
+One-time holdout command retained for reproducibility. Holdout v1 has already
+been run after the calibrated prompt was frozen and committed; its results must
+not be used for tuning:
 
 ```text
 python scripts/run_live_semantic_evaluation.py \
   --confirm-live \
   --scenario-pack holdout
 ```
+
+## Current reviewed results
+
+The repository contains two human-reviewed post-calibration records:
+
+| Pack | Reviewed result | Interpretation |
+|---|---|---|
+| [Calibration regression v2](evaluation_runs/2026-07-27_granite-4-h-small_calibration-v2-review.md) | Strict pass 8/8; pass rate 1.0; required-detection recall 1.0; false-positive scenario count 0 | Calibration regression only. These scenarios informed prompt calibration, so this is not an independent benchmark. |
+| [Frozen holdout v1](evaluation_runs/2026-07-27_granite-4-h-small_holdout-v1-review.md) | Strict pass 5/8; pass rate 0.625; required-detection recall 0.5; false-positive scenario count 0; citation-only baseline 2/8 | One-time, non-blinded holdout. False negatives remained for H4 causation, H6 role-boundary, and H8 citation-mismatch wording. |
+
+The semantic reviewer remains probabilistic and non-authoritative, and human
+review remains required. These small packs do not support statistical
+generalization or a claim of production reliability. The frozen fixtures,
+expectations, scoring logic, raw outputs, and reviewed records remain
+distinct and unchanged.
 
 ## Semantic prompt calibration v2
 
@@ -227,10 +243,9 @@ The calibration goals are:
   when both are defensible; and
 - prohibit ROI or budget labels when a claim contains no financial content.
 
-No post-calibration performance numbers are available yet. The original
-baseline and raw artifacts remain immutable. A calibration regression run must
-occur before the revised prompt is frozen. The holdout may run only after the
-calibrated prompt is committed.
+The reviewed calibration regression and frozen holdout results are recorded
+above. The original baseline, fixtures, raw artifacts, and reviewed records
+remain immutable. Holdout results must not be used for further prompt tuning.
 
 Regression acceptance gate:
 

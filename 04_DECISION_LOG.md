@@ -494,3 +494,72 @@ Active submission-facing documentation must use the August 2026 identity. The cu
 ### Status
 
 Accepted for active competition-facing documentation.
+
+---
+
+## Decision 005
+
+**Date:** 2026-08-30
+**Area:** Final Product Hero and Evaluator Experience
+
+### Decision
+
+Adopt accepted human scenario revision plus deterministic Decision Diff as the final RoleLens Hero interaction. Replace the simulated-review-centered product presentation as the primary evaluator path.
+
+### Reason
+
+The earlier simulated-review interaction demonstrated review controls but did not make a changed business state immediately visible. The Decision Diff implementation established a concrete state-changing interaction: a human changes an accepted scenario Assumption, deterministic calculations rebuild the scenario, and RoleLens shows exactly which dependent outputs changed while unchanged Evidence remains intact.
+
+### Preserved Architecture
+
+- Evidence Objects with stable identity, scope, and source provenance
+- Claim-level grounding and the rule: no Evidence ID, no evidence-backed decision claim
+- Five role-policy-constrained business views over shared Evidence
+- Deterministic risk and dependency controls
+- Human acceptance and final decision authority
+- IBM Granite grounding with deterministic validation
+- Epistemic separation between observations, external context, priorities, and Assumptions
+
+### Final Hero
+
+```text
+human edits a scenario Assumption
+→ draft remains UNSAVED until accepted through Recalculate
+→ deterministic scenario recomputation
+→ dependency-aware role impact
+→ Decision Diff shows changed and unchanged state
+→ dependent prior Granite brief becomes STALE
+→ one governed Granite call refreshes five briefs for the accepted state
+```
+
+The current 3% → 7% demo changes the modeled break-even state and Sales / Marketing pilot-review eligibility without changing the observed Evidence. `CLEARS_BREAK_EVEN` is not approval or execution permission.
+
+### Rejected Scope
+
+- Generic BI platform or CSV chatbot
+- Live web research
+- Warehouse advisory product
+- Production dynamic masking
+- Predictive churn or causal inference
+- Individual customer targeting
+- Five autonomous agents
+- Enterprise approval or execution permissions
+- Power BI or Tableau replacement
+
+### Validation Evidence
+
+The final Hero was implemented through these reviewed repository commits and their associated test files:
+
+- `f02b62d` — metadata-driven Decision Diff engine; `tests/test_decision_diff_engine.py`
+- `ddc680b` — Evidence-aware Decision Diff bridge; `tests/test_decision_diff_rolelens.py`
+- `c798107` — human decision-revision experience; `tests/test_decision_lab.py`
+- `79f8959` — React Decision Room and FastAPI baseline; frontend tests and `tests/test_product_api.py`
+- `b74b953` — trusted decision-impact propagation; frontend tests and `tests/test_product_api.py`
+- `689e96a` — Evidence, role, and revision depth; frontend tests and `tests/test_product_api.py`
+- `ca6191a` — governed Granite role-impact briefs; provider, plan, role-impact, product API, and frontend tests
+
+Commit existence is not used as evidence of IBM Bob involvement. Bob attribution remains governed by the dedicated usage logs.
+
+### Status
+
+**Active — final submission decision.**

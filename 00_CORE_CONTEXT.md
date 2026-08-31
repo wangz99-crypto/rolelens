@@ -1,26 +1,30 @@
 # 00_CORE_CONTEXT.md — RoleLens
 
 > Updated: 2026-08-30
-> Status: Canonical project context
+> Status: Canonical final-submission context
 > Purpose: Shared source of truth for IBM Bob, Codex, and human review.
 
 ## Project
 
-IBM AI Builders Challenge — August 2026
+**IBM AI Builders Challenge with IBM Bob — August 2026**
+
+**Wildcard Challenge — Build Intelligent Systems for the Future of Work**
 
 Participant: Zhe Wang — University of Dayton — M.S. Business Analytics — solo participant
 
-Challenge track: Wildcard Challenge — Build Intelligent Systems for the Future of Work
-
 ## Selected Direction
 
-**RoleLens: AI Decision Team for Business Data**
+**RoleLens — evidence-controlled, role-aware decision change workspace**
 
-RoleLens converts mixed business materials—structured data, business reports, and strategy context—into evidence-backed role views, risks, missing information, an ordered workflow, and a human-reviewed decision memo.
+**Know what must change when the decision changes.**
+
+RoleLens addresses decision state drift: a business decision can change when an accepted Assumption changes while the observed Evidence remains valid. The product rebuilds the accepted scenario deterministically, propagates dependency-aware role impact, shows a Decision Diff, and marks an earlier fingerprint-bound Granite brief STALE until it is regenerated from the new accepted state.
+
+Primary user: Business Analyst, Strategy & Operations professional, or cross-functional decision owner.
 
 ## Product Boundary
 
-RoleLens is a decision-support workflow, not a generic chatbot and not a simulated team of five AI coworkers.
+RoleLens is a decision-support prototype, not a generic chatbot, generic BI platform, production approval system, or autonomous execution system.
 
 ### User-visible business roles
 
@@ -30,142 +34,114 @@ RoleLens is a decision-support workflow, not a generic chatbot and not a simulat
 4. Sales / Marketing
 5. Project Manager
 
-These are policy-constrained views over shared evidence. Their allowed inputs, required outputs, forbidden actions, and mandatory warnings are defined in `config/role_policy.json`.
+These are governed functional views over shared Evidence and accepted Decision state. They are not five independent agents. Runtime boundaries remain defined by `config/role_policy.json`.
 
-### Internal system components
-
-1. Evidence Builder
-2. Role Engine
-3. Risk Reviewer
-4. Workflow Planner
-5. Decision Memo Composer
-
-The internal components perform bounded processing steps. Reference-derived labels such as Evidence Curator, Finance Reviewer, and Operations Reviewer are design inspiration only and are not additional user-facing roles.
-
-## Core Workflow
+### Final Hero Interaction
 
 ```text
-Mixed business materials
-→ Source manifests and bounded evidence candidates
-→ Evidence Objects with stable IDs and exact source locators
-→ Five policy-constrained role views with claim-level citations
-→ Risk and assumption checks
-→ Cross-role action sequence
-→ Human review and revision
-→ Decision memo
+Human changes an accepted business Assumption as a draft
+→ draft remains UNSAVED until Recalculate
+→ accepted recalculation rebuilds trusted scenario state
+→ deterministic dependency propagation computes role impact
+→ Decision Diff shows changed and unchanged outputs
+→ prior fingerprint-bound AI brief becomes STALE
+→ one governed IBM Granite call realizes five refreshed Role Impact Briefs
+→ deterministic validation runs before display
 ```
+
+Observed Evidence does not change merely because a scenario Assumption changes. A scenario clearing modeled break-even establishes eligibility for pilot review only; it does not approve or authorize execution.
+
+## Implemented Competition Surface
+
+- React / TypeScript / Vite Decision Room with Impact Map, Evidence depth, role drawers, and revision history
+- FastAPI product API with stateless trusted-state reconstruction
+- Decimal-based break-even scenario calculation
+- Deterministic Decision Diff and dependency-aware role impact propagation
+- Stable Evidence identity, source provenance, exact locators, and scope separation
+- Accepted-state SHA-256 fingerprint and NOT_GENERATED / CURRENT / STALE AI lifecycle
+- Deterministic `RoleBriefPlanSet` containing five roles × three SemanticAtoms
+- One structured IBM watsonx.ai Granite 4-H Small call for all five role briefs
+- Deterministic final refs, handoffs, and policy/safety validation
+- Frozen semantic-review calibration and holdout evidence with human review
+- Licensed, reproducible public IBM-hosted sample data
+
+Historical Streamlit, workflow-planning, memo, and simulated-review modules remain in the repository, but they are not the final evaluator Hero path.
 
 ## Current Phase
 
-**Slice 5 — Competition Finish**
+**Final Submission / Submission Freeze**
 
-RoleLens now has a working product prototype with a FastAPI backend, React decision workspace, deterministic scenario and role-impact logic, governed Evidence, and explicit IBM Granite role-brief generation. The current Slice 5 task is submission completion and reconciliation of active competition-facing documentation with the implemented product.
-
-Historical July research, architecture decisions, Bob work, evaluations, and dated project records remain historically accurate; they do not define the active August submission identity.
+The working prototype and final Hero are implemented. Current work is limited to submission documentation consistency, link accessibility, evidence truthfulness, and final package verification. Product behavior is frozen for this documentation closeout.
 
 ## Current Top Risks
 
-1. The current real sample evidence primarily grounds Data Analyst and Data Engineer views. Without Task 5B, Executive and Sales must abstain and Project Manager generation is blocked; generic role cards would violate the evidence contract.
-2. The provider-neutral Role Engine, live provider adapter, Risk Checker, Workflow Planner, Decision Memo, human-review flow, and Streamlit UI are not yet implemented.
-3. A five-call role-generation design is only provisional. Live-provider latency, cost, rate limits, and four-role parallelism plus sequential Project Manager behavior must be measured against the three-minute demo budget.
-4. IBM Bob must remain the primary production development tool, but Bob tasks must be narrow enough to avoid quota waste, scope overruns, and self-validating implementation errors.
+1. Final README, canonical documents, demo narration, and challenge-platform copy must describe the same implemented Decision Diff Hero.
+2. The public repository, demo video, and challenge-platform URLs must be checked from a logged-out session before submission.
+3. IBM Bob claims must remain limited to activities supported by the two Bob logs; later commits cannot be attributed from commit existence alone.
+4. IBM SkillsBuild completion and challenge-platform submission still require external verification.
+5. The small semantic evaluation packs must not be presented as statistical or production reliability evidence.
 
-## Locked Decisions
+## Locked Decisions That Remain Active
 
-1. RoleLens is the main project direction.
-2. V1 uses the five user-visible roles listed above.
-3. Evidence Objects are the shared intermediate contract.
-4. Human review and revision are product mechanisms.
-5. V1 excludes real email, real approvals, enterprise integrations, long-term memory, and complex multi-agent infrastructure.
-6. The existing **69/80 is a pre-prototype idea-selection prior**, not a product-completion score or a claim of first-place readiness.
-7. Evidence identity and source-span provenance design is approved. `source_id` uses conservative order-sensitive identity. `evidence_id` uses a deterministic prefix plus 12-hex display suffix with a full digest stored separately. `SourceFormat` and `SemanticContextCategory` remain separate. `source_scope` and `evidence_scope` carry epistemic status.
-8. `app/identity.py` computes deterministic identity values. `app/evidence_builder.py` is the only production module that converts approved candidates into `EvidenceObject` records.
-9. Task 5B adds a bounded `TextEvidenceCandidate` alongside `HealthFindingCandidate`; it does not replace the health candidate with a generic abstraction.
-10. Task 5B performs deterministic exact-source extraction only:
-    - industry context → one candidate per nonblank normalized paragraph;
-    - strategy profile → one candidate per structured field;
-    - user assumption → one candidate per structured field;
-    - business question and decision goal → source/trajectory context only, no Evidence Object.
-11. Task 5B cannot author inferred business findings. `finding` and `supporting_evidence` both preserve the exact normalized excerpt. Evidence type, normalized claim key, and extraction-policy version are system-controlled identity inputs.
-12. Role outputs require claim-level grounding through `GroundedFinding`. View-level citations alone are insufficient.
-13. No admissible evidence produces typed `InsufficientEvidence`, no generic role card, and no unsupported next action.
-14. The approved production sequence is:
-    ```text
-    Task 5B → Task 6A → Task 6B → Task 7 → Task 8 → Task 9 → Task 10
-    ```
-15. Task 6A defines grounded role contracts and a provider-neutral engine. Task 6B adds one live provider adapter. The exact five-call runtime design remains provisional until latency and cost are measured.
-16. Local Codex spike implementations are disposable research artifacts. IBM Bob must independently implement approved production contracts.
+1. Evidence Objects are the mandatory grounding layer: no Evidence ID, no evidence-backed decision claim.
+2. `source_id`, `evidence_id`, and exact `source_locator` serve distinct identity and provenance purposes.
+3. Internal observations, external context, user Assumptions, stated priorities, and decision-only context remain epistemically distinct.
+4. `app/identity.py` computes deterministic identities; `app/evidence_builder.py` is the Evidence Object minting boundary.
+5. The five business roles are policy-constrained views over shared Evidence, not separate AI workers.
+6. Human acceptance is required to change trusted Decision state; an unsaved draft cannot propagate impact.
+7. Scenario arithmetic, break-even status, accepted-state transitions, role posture, refs, and handoffs are deterministic.
+8. IBM Granite performs bounded language realization over a deterministic semantic plan. It does not invent financial math, choose Evidence, assign approval, or authorize execution.
+9. Atom IDs provide governed semantic source binding, not formal proof of semantic equivalence.
+10. Probabilistic semantic review is non-authoritative; human review remains required.
+11. V1 excludes individual customer targeting, automatic outreach, real approval permissions, multi-user authentication, enterprise integrations, long-term memory, vector databases, and complex multi-agent infrastructure.
+12. The historical **69/80** value is a July idea-selection prior, not a product-completion score or judge outcome.
 
-## Open Questions
+## Historical Development Context
 
-1. Which live runtime model/provider will be used for Task 6B, and how will IBM technology be made visible in the demo?
-2. Is five-call generation demo-safe after measuring latency, cost, retries, and rate limits?
-3. How much human editing and rejection/revision history will V1 preserve?
-4. What exact B2B SaaS churn dataset and internal business evidence will support Executive and Sales without unsupported ROI or broad-outreach claims?
-5. How should natural-language role-policy rules be divided between Task 6 prompt constraints, Task 7 deterministic checks, and mandatory human review?
+RoleLens development and project records began in July 2026. Decisions 001–003, July IBM Bob entries, architecture research, calibration work, and dated evaluation artifacts remain historically accurate and are preserved in their original records.
 
-### Resolved questions
+The final Hero emerged through the August 26–30 implementation sequence:
 
-- Data-health `normalized_claim_key` values are implemented and tested.
-- Claim-level citations are required.
-- `TextEvidenceCandidate` coexists with `HealthFindingCandidate`.
-- Business question and decision goal do not produce evidence.
-- The current `regional_sales_q1_q4.csv` remains a backend test fixture; it is not yet approved as the final competition demo dataset.
+- `f02b62d` — metadata-driven Decision Diff engine
+- `ddc680b` — Decision Diff bridge to RoleLens Evidence
+- `c798107` — human decision-revision experience spike
+- `79f8959` — React Decision Room and real baseline
+- `b74b953` — trusted decision-impact propagation
+- `689e96a` — Evidence, role, and revision depth
+- `1d8c863` — licensed demo data and clone-ready setup
+- `ca6191a` — governed IBM Granite role-impact briefs
+
+These commits are implementation history. They are not, by themselves, evidence that IBM Bob performed each task.
+
+## Remaining External Verification
+
+- IBM SkillsBuild completion evidence
+- Public demo-video URL and logged-out accessibility
+- Challenge-platform project page and final submission state
+- Logged-out public GitHub accessibility immediately before submission
+- Historical-secret scan if required for the final security checklist
 
 ## Next Deliverable
 
-**Task 5B — Deterministic text and structured-context evidence completion**
+**Final submission package verification**
 
-Minimum production scope:
+Verify:
 
-```text
-pasted industry context
-→ exact normalized paragraph candidates
-→ external_context Evidence Objects
-
-strategy profile form field
-→ exact structured candidate
-→ stated_priority Evidence Object
-
-user assumption form field
-→ exact structured candidate
-→ assumption Evidence Object
-
-business question / decision goal
-→ decision_context source records only
-→ no Evidence Object
-```
-
-Required implementation boundary:
-
-- add `TextEvidenceCandidate` without replacing `HealthFindingCandidate`;
-- add one bounded context-evidence extractor;
-- support `form_input` source manifests for approved structured fields;
-- extend `evidence_builder.py` to accept the explicit candidate union;
-- enforce candidate ↔ manifest ↔ locator category and format consistency;
-- use canonical machine role keys as routing hints only;
-- keep every existing production test green;
-- use IBM Bob for the independent production implementation and log prompt → output → human changes → verification.
-
-After Task 5B passes:
-
-```text
-Task 6A — RoleKey, GroundedFinding, RoleView, typed failures,
-          policy validation, strict parsing, provider-neutral engine,
-          deterministic visibly-offline test provider
-
-Task 6B — one live provider adapter, credential handling, timeout/retry policy,
-          latency and cost measurement
-```
+1. README, canonical documents, final demo narration, and platform copy are consistent.
+2. Public repository and video links work without authentication.
+3. Video duration is no longer than three minutes.
+4. Bob claims map to actual logged prompts, outputs, human changes, and verification.
+5. Frozen evaluation results are reported with their calibration/holdout limitations.
+6. No credentials, private data, unsupported outcome claims, or production-readiness claims appear.
 
 ## Non-Negotiable Competition Rules
 
-- IBM Bob is the primary development tool and its use is evidenced.
+- IBM Bob is the primary development tool only to the extent evidenced by actual logs.
 - AI is a core functional component.
 - The prototype runs from documented setup instructions.
-- The GitHub repository and demo video are public.
-- The demo or presentation video is no longer than three minutes.
-- Required IBM SkillsBuild learning activity is completed.
-- Only one project is submitted for the month.
+- The GitHub repository and final demo video must be publicly accessible.
+- The demo video must be no longer than three minutes.
+- Required IBM SkillsBuild activity must be completed and verified.
+- Only one project may be submitted for the August monthly competition.
 
-See `01_RULES_SCORECARD.md` for current status and evidence links.
+See `01_RULES_SCORECARD.md` for current readiness status.

@@ -1,22 +1,21 @@
 # docs/bob_build_log.md — RoleLens
 
-> 更新日期：2026-07-12
+> 更新日期：2026-08-30
 > 状态：Active Build Log
 > 用途：公开记录 IBM Bob 如何作为主要开发工具参与 RoleLens 的规划、实现、测试和文档。
 
 # IBM Bob Build Log
 
-IBM Bob is used as the primary development assistant for RoleLens.
+This log records preserved Bob evidence and the July production history whose Bob provenance is confirmed by the human author and supported by Git. It distinguishes exact prompts from timeline entries reconstructed from commits.
 
-This log records how Bob supported the project across:
+The verified entries cover:
 
 ```text
-planning
-architecture
-implementation
-debugging
-testing
-documentation
+foundation planning and architecture
+Tasks 1–5 implementation
+test-driven debugging and testing
+Evidence, role, Granite, risk, evaluation, workflow, review, and memo layers
+first complete Streamlit prototype
 ```
 
 ---
@@ -30,6 +29,8 @@ documentation
 **Type:** Planning only — no source code or tests created
 
 **Prompt Given to IBM Bob:**
+
+**Prompt preservation:** Exact historical prompt not preserved. The planning summary below is preserved.
 
 ```text
 Plan Mode. Architecture review and Evidence Identity design for RoleLens V1.
@@ -121,7 +122,9 @@ Not yet committed. Pending human review of documentation updates.
 
 ---
 
-# Planned Bob Tasks (Approved Sequence)
+# Original Planned Bob Tasks (Approved Sequence)
+
+This is the original July plan. The timeline below records the later Bob-assisted production outcomes.
 
 ## Task 1 — Core Identity and Provenance Schemas
 
@@ -178,6 +181,8 @@ Task 12 — README, demo preparation, final documentation
 **Type:** Full implementation — source code, tests, sample data
 
 **Prompt Given to IBM Bob:**
+
+**Prompt preservation:** Exact preserved Bob prompt.
 
 ```text
 Agent Mode. Continue. Execute the approved five-task implementation sequence.
@@ -285,4 +290,32 @@ d6785a1  feat(data-health): CSV parsing, deterministic health analysis, DataHeal
 ```
 
 **Evidence Saved:** Yes
+
+---
+
+## July Bob-Built Prototype Timeline
+
+The human author confirms that IBM Bob was the primary development tool for these July production milestones. Git supplies the dates, commit messages, changed files, and resulting implementations. Except for the preserved Tasks 1–5 prompt above, exact historical prompts for these grouped milestones were not preserved.
+
+| Date | Area | Bob-assisted outcome | Representative commit | Verification |
+|---|---|---|---|---|
+| July 12–13 | Architecture, identity, provenance, intake, and Evidence foundation | Human-reviewed architecture plus production schemas, deterministic source/Evidence IDs, source intake, data health, and the sole Evidence Object minting boundary | `29104c2`, `9ff0040`, `13ffafe`, `d6785a1`, `0a91464`, `6b8a6a9` | Preserved Tasks 1–5 record: 627 passed; provenance-hardening commit includes updated tests |
+| July 18–20 | Structured-context Evidence | Text/form candidates, deterministic context extraction, and Evidence minting for text and structured context | `de8be17`, `e5a3ef2`, `794533a` | Schema, intake, parser, context-evidence, and Evidence-builder tests committed |
+| July 20–24 | Governed roles and IBM Granite | Five role contracts and policy, provider-neutral grounded Role Engine, and watsonx Granite role adapter | `6a15296`, `f9385df`, `d3d02a9` | Dedicated role-schema, Role Engine, and Granite-provider tests committed |
+| July 25 | Risk controls | Deterministic epistemic Risk Checker, provider-neutral semantic review, and Granite semantic-risk provider | `cf5248b`, `2c33433`, `3b09688` | Dedicated deterministic and provider tests committed |
+| July 26–27 | Semantic evaluation | Fixed evaluation pack and live runner, frozen holdout infrastructure, calibrated taxonomy, and reviewed calibration/holdout records | `afb6f38`, `f7dc2d8`, `03637e9`, `272002a`, `8f1a2b2` | Scenario/runner tests and human-reviewed run records committed |
+| July 27–28 | Workflow, review, and memo | Deterministic Workflow Planner, workflow scenarios, simulated human-review ledger, fail-closed Decision Memo, and audit scenarios | `6ed0455`, `f28b6d3`, `da3046e`, `7bc9d4a`, `a82b822` | Dedicated workflow, review, memo, and audit-scenario tests committed |
+| July 29–31 | First complete working prototype | End-to-end Streamlit vertical slice, deterministic Telco business Evidence, Granite dataset orientation, and product-first governed Streamlit UI | `e782e87`, `fd4339f`, `fb9e86e`, `0178306` | Demo-pipeline, profile, orientation, and product-UI tests committed |
+
+For the rows reconstructed from Git, **exact historical prompt not preserved**. No task-specific human correction is claimed unless it appears in the detailed preserved entries or commit record. Test files are evidence of implemented verification coverage; only the Tasks 1–5 row carries a preserved numerical test result.
+
+---
+
+## Tool Usage Boundary
+
+**Date:** 2026-08-30
+
+IBM Bob was the primary development tool for the foundational July build and first complete working prototype. The August product retained and extended those Evidence, provenance, role-policy, Granite, risk, workflow, review, memo, and evaluation foundations.
+
+August Decision Diff and React/FastAPI product redesign were developed later with Codex and are not represented here as IBM Bob outputs.
 
