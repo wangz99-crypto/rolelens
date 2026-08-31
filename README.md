@@ -242,4 +242,4 @@ RoleLens is an intentionally bounded competition prototype / proof of concept:
 
 ## Demo Video
 
-**[Final 2:57 demo video — public URL to be added before submission]**
+[Watch the 2:57 RoleLens demo on YouTube](https://youtu.be/KMsBTl9cB4Q)
