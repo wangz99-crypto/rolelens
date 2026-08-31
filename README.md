@@ -148,9 +148,9 @@ See the [evaluation protocol](docs/evaluation.md), [reviewed calibration regress
 
 ## How IBM Bob Was Used
 
-IBM Bob was the primary development tool for RoleLens's foundational build and first complete working prototype in July 2026. It supported the architecture, Evidence identity and provenance system, deterministic data processing and Evidence generation, governed role engine and role-policy enforcement, IBM Granite integration, deterministic and semantic risk controls, evaluation infrastructure, workflow planning, human-review and Decision Memo flow, testing, debugging, and the original end-to-end Streamlit prototype.
+IBM Bob was the primary development tool for RoleLens's foundational build and first complete working prototype in July 2026. It supported the architecture, Evidence identity and provenance system, deterministic data processing and Evidence generation, governed role engine and role-policy enforcement, IBM Granite integration, deterministic and semantic risk controls, evaluation infrastructure, workflow planning, human-review and Decision Memo flow, testing, debugging, and the original end-to-end prototype.
 
-In August, development shifted primarily to Codex for the deterministic scenario redesign, Decision Diff, React/FastAPI Decision Room, trusted impact propagation, final product UX, and governed Role Impact Brief integration. That work retained and extended the Bob-built Evidence, provenance, role-policy, Granite, risk, workflow, and evaluation foundations. Human review remained authoritative throughout; IBM Granite on watsonx.ai is the runtime AI.
+The final August product iteration retained and extended this foundation with the Decision Diff experience and the React/FastAPI Decision Room while preserving the Evidence, provenance, role-policy, Granite, risk, workflow, and evaluation architecture established during the Bob-built prototype.
 
 See the [IBM Bob Usage Log](07_IBM_BOB_USAGE_LOG.md) and [Bob Build Log](docs/bob_build_log.md).
 
